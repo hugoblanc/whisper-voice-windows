@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using WhisperVoice.Logging;
 
 namespace WhisperVoice.Tray;
 
@@ -49,7 +50,8 @@ public class TrayIcon : IDisposable
         contextMenu.Items.Add(_statusMenuItem);
 
         contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add("Version 2.2.0", null, null!) { Enabled = false };
+        contextMenu.Items.Add($"Version {Logger.Version}", null, null!) { Enabled = false };
+        contextMenu.Items.Add("Open Logs", null, (_, _) => Logger.OpenLogFile());
         contextMenu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
 
         _notifyIcon.ContextMenuStrip = contextMenu;

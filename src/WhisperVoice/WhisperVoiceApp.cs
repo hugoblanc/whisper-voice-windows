@@ -3,6 +3,7 @@ using WhisperVoice.Audio;
 using WhisperVoice.Clipboard;
 using WhisperVoice.Config;
 using WhisperVoice.Hotkeys;
+using WhisperVoice.Logging;
 using WhisperVoice.Tray;
 
 namespace WhisperVoice;
@@ -53,27 +54,33 @@ public class WhisperVoiceApp : Form
         var errors = new List<string>();
 
         // Register toggle hotkey (Ctrl+Shift+Space by default)
+        var shortcut = _config.GetToggleShortcutDescription();
+        Logger.Info($"Registering toggle hotkey: {shortcut}");
         try
         {
             _toggleHotkeyId = _globalHotkey.Register(_config.ShortcutModifiers, _config.ShortcutKeyCode);
+            Logger.Info($"Toggle hotkey registered successfully (ID: {_toggleHotkeyId})");
         }
         catch (Exception ex)
         {
-            var shortcut = _config.GetToggleShortcutDescription();
+            Logger.Error($"Failed to register toggle hotkey: {shortcut}", ex);
             errors.Add($"Toggle shortcut ({shortcut}): Another app may be using this shortcut. Try a different one in config.");
         }
 
         // Setup push-to-talk keyboard hook
+        var pttKey = _config.GetPushToTalkKeyDescription();
+        Logger.Info($"Setting up PTT keyboard hook for: {pttKey}");
         _keyboardHook.KeyDown += OnPttKeyDown;
         _keyboardHook.KeyUp += OnPttKeyUp;
 
         try
         {
             _keyboardHook.Start(_config.PushToTalkKeyCode);
+            Logger.Info("PTT keyboard hook installed successfully");
         }
         catch (Exception ex)
         {
-            var pttKey = _config.GetPushToTalkKeyDescription();
+            Logger.Error($"Failed to install PTT keyboard hook for: {pttKey}", ex);
             errors.Add($"Push-to-Talk ({pttKey}): Failed to install keyboard hook. Your antivirus may be blocking it.");
         }
 
@@ -134,14 +141,17 @@ public class WhisperVoiceApp : Form
     {
         if (_state != AppState.Idle) return;
 
+        Logger.Info("Starting recording...");
         try
         {
             _recorder.StartRecording();
             SetState(AppState.Recording);
+            Logger.Info("Recording started successfully");
             _trayIcon.ShowNotification("Recording", "Recording started...");
         }
         catch (Exception ex)
         {
+            Logger.Error("Failed to start recording", ex);
             _trayIcon.ShowNotification("Recording Error", ex.Message, ToolTipIcon.Error);
         }
     }
@@ -150,8 +160,10 @@ public class WhisperVoiceApp : Form
     {
         if (_state != AppState.Recording) return;
 
+        Logger.Info("Stopping recording...");
         var audioPath = _recorder.StopRecording();
         SetState(AppState.Transcribing);
+        Logger.Info($"Recording stopped. Audio file: {audioPath}");
 
         // Start timeout timer
         StartTimeoutTimer();
@@ -163,10 +175,16 @@ public class WhisperVoiceApp : Form
                 throw new InvalidOperationException("No audio recorded");
             }
 
+            var fileInfo = new FileInfo(audioPath);
+            Logger.Info($"Audio file size: {fileInfo.Length} bytes");
+
+            Logger.Info("Sending audio to Whisper API...");
             var text = await _whisperApi.TranscribeAsync(audioPath);
 
             if (!string.IsNullOrWhiteSpace(text))
             {
+                Logger.Info($"Transcription received: {text.Length} chars");
+                Logger.Debug($"Transcription text: {text}");
                 ClipboardPaste.Paste(text);
 
                 var preview = text.Length > 50 ? text[..50] + "..." : text;
@@ -174,11 +192,13 @@ public class WhisperVoiceApp : Form
             }
             else
             {
+                Logger.Warn("Transcription returned empty text");
                 _trayIcon.ShowNotification("No Speech Detected", "The recording was empty or contained no speech.");
             }
         }
         catch (Exception ex)
         {
+            Logger.Error("Transcription failed", ex);
             _trayIcon.ShowNotification("Transcription Error", ex.Message, ToolTipIcon.Error);
         }
         finally

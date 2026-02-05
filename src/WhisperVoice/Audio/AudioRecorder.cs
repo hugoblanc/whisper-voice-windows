@@ -1,4 +1,5 @@
 using NAudio.Wave;
+using WhisperVoice.Logging;
 
 namespace WhisperVoice.Audio;
 
@@ -27,18 +28,24 @@ public class AudioRecorder : IDisposable
 
     public static string? GetMicrophoneError()
     {
+        Logger.Debug($"Checking microphone availability. Device count: {WaveInEvent.DeviceCount}");
+
         if (WaveInEvent.DeviceCount == 0)
+        {
+            Logger.Warn("No microphone detected");
             return "No microphone detected. Please connect a microphone and restart the app.";
+        }
 
         // Check Windows microphone permission
         try
         {
             using var testWaveIn = new WaveInEvent();
             testWaveIn.WaveFormat = new WaveFormat(16000, 16, 1);
-            // Just creating it tests basic access
+            Logger.Debug("Microphone access test passed");
         }
         catch (Exception ex)
         {
+            Logger.Error("Microphone access test failed", ex);
             if (ex.Message.Contains("denied") || ex.Message.Contains("access"))
                 return "Microphone access denied. Please allow microphone access in Windows Settings > Privacy > Microphone.";
             return $"Microphone error: {ex.Message}";
