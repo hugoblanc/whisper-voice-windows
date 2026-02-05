@@ -150,7 +150,7 @@ public class WhisperVoiceApp : Form
             _recorder.StartRecording();
             SetState(AppState.Recording);
             Logger.Info("Recording started successfully");
-            _trayIcon.ShowNotification("Recording", "Recording started...");
+            // No notification - icon change is enough feedback
         }
         catch (Exception ex)
         {
