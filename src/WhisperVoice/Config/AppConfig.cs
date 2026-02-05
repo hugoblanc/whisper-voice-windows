@@ -4,10 +4,29 @@ namespace WhisperVoice.Config;
 
 public class AppConfig
 {
-    public string ApiKey { get; set; } = string.Empty;
+    public string Provider { get; set; } = "openai";      // Default provider for backward compatibility
+    public string ApiKey { get; set; } = string.Empty;    // Main API key (backward compatibility)
+    public Dictionary<string, string>? ProviderApiKeys { get; set; }  // Per-provider API keys
     public uint ShortcutModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT (Ctrl+Shift)
     public uint ShortcutKeyCode { get; set; } = 0x20;     // VK_SPACE
     public uint PushToTalkKeyCode { get; set; } = 0x72;   // VK_F3
+
+    /// <summary>
+    /// Get the API key for the specified provider, falling back to main ApiKey for backward compatibility
+    /// </summary>
+    public string GetApiKeyForProvider(string providerId)
+    {
+        if (ProviderApiKeys?.TryGetValue(providerId, out var key) == true && !string.IsNullOrEmpty(key))
+        {
+            return key;
+        }
+        return ApiKey;
+    }
+
+    /// <summary>
+    /// Get the API key for the currently selected provider
+    /// </summary>
+    public string GetCurrentApiKey() => GetApiKeyForProvider(Provider);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

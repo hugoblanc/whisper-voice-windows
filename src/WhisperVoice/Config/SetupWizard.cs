@@ -1,8 +1,12 @@
+using WhisperVoice.Api;
+
 namespace WhisperVoice.Config;
 
 public class SetupWizard : Form
 {
+    private ComboBox _providerCombo = null!;
     private TextBox _apiKeyTextBox = null!;
+    private LinkLabel _apiKeyLink = null!;
     private ComboBox _shortcutCombo = null!;
     private ComboBox _pttCombo = null!;
     private CheckBox _autoStartCheckBox = null!;
@@ -19,7 +23,7 @@ public class SetupWizard : Form
     private void InitializeComponents()
     {
         Text = "Whisper Voice - Setup";
-        Size = new Size(450, 380);
+        Size = new Size(450, 420);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -42,48 +46,64 @@ public class SetupWizard : Form
             AutoSize = true
         };
 
+        // Provider selection
+        var providerLabel = new Label
+        {
+            Text = "Transcription Provider:",
+            Location = new Point(20, 85),
+            AutoSize = true
+        };
+
+        _providerCombo = new ComboBox
+        {
+            Location = new Point(20, 105),
+            Size = new Size(200, 25),
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+
+        // Populate providers from factory
+        foreach (var provider in TranscriptionProviderFactory.GetAvailableProviders())
+        {
+            _providerCombo.Items.Add(new ProviderComboItem(provider));
+        }
+        _providerCombo.SelectedIndex = 0;
+        _providerCombo.SelectedIndexChanged += ProviderCombo_Changed;
+
         // API Key
         var apiKeyLabel = new Label
         {
-            Text = "OpenAI API Key:",
-            Location = new Point(20, 85),
+            Text = "API Key:",
+            Location = new Point(20, 140),
             AutoSize = true
         };
 
         _apiKeyTextBox = new TextBox
         {
-            Location = new Point(20, 105),
+            Location = new Point(20, 160),
             Size = new Size(390, 25),
             UseSystemPasswordChar = true,
             PlaceholderText = "sk-..."
         };
 
-        var apiKeyLink = new LinkLabel
+        _apiKeyLink = new LinkLabel
         {
             Text = "Get your API key from platform.openai.com",
-            Location = new Point(20, 133),
+            Location = new Point(20, 188),
             AutoSize = true
         };
-        apiKeyLink.Click += (_, _) =>
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "https://platform.openai.com/api-keys",
-                UseShellExecute = true
-            });
-        };
+        _apiKeyLink.Click += ApiKeyLink_Click;
 
         // Toggle shortcut
         var shortcutLabel = new Label
         {
             Text = "Toggle Shortcut (start/stop recording):",
-            Location = new Point(20, 165),
+            Location = new Point(20, 220),
             AutoSize = true
         };
 
         _shortcutCombo = new ComboBox
         {
-            Location = new Point(20, 185),
+            Location = new Point(20, 240),
             Size = new Size(180, 25),
             DropDownStyle = ComboBoxStyle.DropDownList
         };
@@ -100,13 +120,13 @@ public class SetupWizard : Form
         var pttLabel = new Label
         {
             Text = "Push-to-Talk Key (hold to record):",
-            Location = new Point(230, 165),
+            Location = new Point(230, 220),
             AutoSize = true
         };
 
         _pttCombo = new ComboBox
         {
-            Location = new Point(230, 185),
+            Location = new Point(230, 240),
             Size = new Size(180, 25),
             DropDownStyle = ComboBoxStyle.DropDownList
         };
@@ -117,7 +137,7 @@ public class SetupWizard : Form
         _autoStartCheckBox = new CheckBox
         {
             Text = "Start automatically when Windows starts",
-            Location = new Point(20, 225),
+            Location = new Point(20, 280),
             AutoSize = true
         };
 
@@ -126,7 +146,7 @@ public class SetupWizard : Form
         {
             Text = "",
             ForeColor = Color.Red,
-            Location = new Point(20, 260),
+            Location = new Point(20, 310),
             Size = new Size(390, 20)
         };
 
@@ -134,7 +154,7 @@ public class SetupWizard : Form
         _saveButton = new Button
         {
             Text = "Save && Start",
-            Location = new Point(280, 290),
+            Location = new Point(280, 340),
             Size = new Size(130, 35),
             BackColor = Color.FromArgb(0, 120, 212),
             ForeColor = Color.White,
@@ -143,10 +163,14 @@ public class SetupWizard : Form
         _saveButton.FlatAppearance.BorderSize = 0;
         _saveButton.Click += SaveButton_Click;
 
+        // Update UI for initial provider selection
+        UpdateProviderUI();
+
         Controls.AddRange(new Control[]
         {
             titleLabel, subtitleLabel,
-            apiKeyLabel, _apiKeyTextBox, apiKeyLink,
+            providerLabel, _providerCombo,
+            apiKeyLabel, _apiKeyTextBox, _apiKeyLink,
             shortcutLabel, _shortcutCombo,
             pttLabel, _pttCombo,
             _autoStartCheckBox,
@@ -155,19 +179,58 @@ public class SetupWizard : Form
         });
     }
 
+    private void ProviderCombo_Changed(object? sender, EventArgs e)
+    {
+        UpdateProviderUI();
+    }
+
+    private void UpdateProviderUI()
+    {
+        if (_providerCombo.SelectedItem is ProviderComboItem item)
+        {
+            var host = new Uri(item.Info.ApiKeyHelpUrl).Host;
+            _apiKeyLink.Text = $"Get your API key from {host}";
+            _apiKeyLink.Tag = item.Info.ApiKeyHelpUrl;
+
+            // Update placeholder based on provider
+            _apiKeyTextBox.PlaceholderText = item.Info.Id == "openai" ? "sk-..." : "Enter API key";
+        }
+    }
+
+    private void ApiKeyLink_Click(object? sender, EventArgs e)
+    {
+        if (_apiKeyLink.Tag is string url)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+    }
+
+    private class ProviderComboItem
+    {
+        public ProviderInfo Info { get; }
+        public ProviderComboItem(ProviderInfo info) => Info = info;
+        public override string ToString() => Info.DisplayName;
+    }
+
     private void SaveButton_Click(object? sender, EventArgs e)
     {
         var apiKey = _apiKeyTextBox.Text.Trim();
+        var selectedProvider = (_providerCombo.SelectedItem as ProviderComboItem)?.Info;
 
-        if (string.IsNullOrEmpty(apiKey))
+        if (selectedProvider == null)
         {
-            _statusLabel.Text = "Please enter your API key.";
+            _statusLabel.Text = "Please select a provider.";
             return;
         }
 
-        if (!apiKey.StartsWith("sk-") && !apiKey.StartsWith("sk-proj-"))
+        // Provider-specific validation
+        if (!TranscriptionProviderFactory.ValidateApiKey(selectedProvider.Id, apiKey, out var errorMessage))
         {
-            _statusLabel.Text = "Invalid API key format. Should start with 'sk-' or 'sk-proj-'.";
+            _statusLabel.Text = errorMessage ?? "Invalid API key.";
             return;
         }
 
@@ -195,6 +258,7 @@ public class SetupWizard : Form
 
         Result = new AppConfig
         {
+            Provider = selectedProvider.Id,
             ApiKey = apiKey,
             ShortcutModifiers = shortcutModifiers,
             ShortcutKeyCode = 0x20, // VK_SPACE

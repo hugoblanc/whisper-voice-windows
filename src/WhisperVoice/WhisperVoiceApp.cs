@@ -13,7 +13,7 @@ public class WhisperVoiceApp : Form
     private readonly AppConfig _config;
     private readonly TrayIcon _trayIcon;
     private readonly AudioRecorder _recorder;
-    private readonly WhisperApi _whisperApi;
+    private readonly ITranscriptionProvider _transcriptionProvider;
     private readonly GlobalHotkey _globalHotkey;
     private readonly KeyboardHook _keyboardHook;
 
@@ -35,7 +35,8 @@ public class WhisperVoiceApp : Form
         Opacity = 0;
 
         _recorder = new AudioRecorder();
-        _whisperApi = new WhisperApi(config.ApiKey);
+        _transcriptionProvider = TranscriptionProviderFactory.Create(config);
+        Logger.Info($"Using transcription provider: {_transcriptionProvider.DisplayName}");
 
         _trayIcon = new TrayIcon(
             config.GetToggleShortcutDescription(),
@@ -178,8 +179,8 @@ public class WhisperVoiceApp : Form
             var fileInfo = new FileInfo(audioPath);
             Logger.Info($"Audio file size: {fileInfo.Length} bytes");
 
-            Logger.Info("Sending audio to Whisper API...");
-            var text = await _whisperApi.TranscribeAsync(audioPath);
+            Logger.Info($"Sending audio to {_transcriptionProvider.DisplayName}...");
+            var text = await _transcriptionProvider.TranscribeAsync(audioPath);
 
             if (!string.IsNullOrWhiteSpace(text))
             {

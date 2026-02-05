@@ -124,9 +124,14 @@ public static class Logger
     public static void LogConfig(Config.AppConfig config)
     {
         Info($"Config loaded from: {Config.AppConfig.ConfigPath}");
+        Info($"Provider: {config.Provider}");
         Info($"Toggle shortcut: {config.GetToggleShortcutDescription()}");
         Info($"PTT key: {config.GetPushToTalkKeyDescription()}");
-        Info($"API key: {(string.IsNullOrEmpty(config.ApiKey) ? "NOT SET" : "sk-***" + config.ApiKey[^4..])}");
+
+        var apiKey = config.GetCurrentApiKey();
+        var maskedKey = string.IsNullOrEmpty(apiKey) ? "NOT SET" :
+            apiKey.Length > 4 ? apiKey[..4] + "***" + apiKey[^4..] : "***";
+        Info($"API key: {maskedKey}");
     }
 
     public static void LogAudioDevices()
