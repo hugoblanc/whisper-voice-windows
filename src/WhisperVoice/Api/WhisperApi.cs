@@ -124,7 +124,14 @@ public class WhisperApi
     {
         using var content = new MultipartFormDataContent();
 
-        var audioBytes = await File.ReadAllBytesAsync(audioFilePath);
+        // Use FileShare.ReadWrite to avoid conflicts if the file handle is still being released
+        byte[] audioBytes;
+        using (var fs = new FileStream(audioFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var ms = new MemoryStream())
+        {
+            await fs.CopyToAsync(ms);
+            audioBytes = ms.ToArray();
+        }
         Logger.Debug($"Sending {audioBytes.Length} bytes to API");
 
         var audioContent = new ByteArrayContent(audioBytes);

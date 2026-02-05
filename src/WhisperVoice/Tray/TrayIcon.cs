@@ -50,7 +50,8 @@ public class TrayIcon : IDisposable
         contextMenu.Items.Add(_statusMenuItem);
 
         contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add($"Version {Logger.Version}", null, null!) { Enabled = false };
+        var versionItem = new ToolStripMenuItem($"Version {Logger.Version}") { Enabled = false };
+        contextMenu.Items.Add(versionItem);
         contextMenu.Items.Add("Open Logs", null, (_, _) => Logger.OpenLogFile());
         contextMenu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
 

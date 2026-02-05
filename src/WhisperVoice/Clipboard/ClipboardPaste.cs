@@ -7,6 +7,34 @@ public static class ClipboardPaste
     [DllImport("user32.dll")]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
     {
@@ -17,7 +45,19 @@ public static class ClipboardPaste
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
+        [FieldOffset(0)] public MOUSEINPUT mi;
         [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -30,14 +70,59 @@ public static class ClipboardPaste
         public IntPtr dwExtraInfo;
     }
 
+    private const uint INPUT_MOUSE = 0;
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_V = 0x56;
 
     public static void Paste(string text)
     {
         if (string.IsNullOrEmpty(text)) return;
+
+        // Get window under mouse cursor and activate it
+        GetCursorPos(out var cursorPos);
+        var targetWindow = WindowFromPoint(cursorPos);
+
+        if (targetWindow != IntPtr.Zero)
+        {
+            // Attach to target window's thread to allow SetForegroundWindow
+            var targetThread = GetWindowThreadProcessId(targetWindow, out _);
+            var currentThread = GetCurrentThreadId();
+            bool attached = false;
+
+            if (targetThread != currentThread)
+            {
+                attached = AttachThreadInput(currentThread, targetThread, true);
+            }
+
+            SetForegroundWindow(targetWindow);
+            Thread.Sleep(50);
+
+            // Click at cursor position to place the text caret there
+            SendInput(2, new INPUT[]
+            {
+                new INPUT
+                {
+                    type = INPUT_MOUSE,
+                    U = new InputUnion { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } }
+                },
+                new INPUT
+                {
+                    type = INPUT_MOUSE,
+                    U = new InputUnion { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } }
+                }
+            }, Marshal.SizeOf<INPUT>());
+
+            Thread.Sleep(50);
+
+            if (attached)
+            {
+                AttachThreadInput(currentThread, targetThread, false);
+            }
+        }
 
         // Copy text to clipboard (must be on STA thread)
         if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
@@ -46,57 +131,39 @@ public static class ClipboardPaste
         }
         else
         {
-            // If not on STA thread, invoke on one
             var thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
-            thread.Join(1000); // Wait max 1 second
+            thread.Join(1000);
         }
 
-        // Small delay before pasting (like macOS version)
         Thread.Sleep(100);
 
         // Simulate Ctrl+V
-        var inputs = new INPUT[]
+        var kbInputs = new INPUT[]
         {
-            // Ctrl down
             new INPUT
             {
                 type = INPUT_KEYBOARD,
-                U = new InputUnion
-                {
-                    ki = new KEYBDINPUT { wVk = VK_CONTROL }
-                }
+                U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL } }
             },
-            // V down
             new INPUT
             {
                 type = INPUT_KEYBOARD,
-                U = new InputUnion
-                {
-                    ki = new KEYBDINPUT { wVk = VK_V }
-                }
+                U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V } }
             },
-            // V up
             new INPUT
             {
                 type = INPUT_KEYBOARD,
-                U = new InputUnion
-                {
-                    ki = new KEYBDINPUT { wVk = VK_V, dwFlags = KEYEVENTF_KEYUP }
-                }
+                U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V, dwFlags = KEYEVENTF_KEYUP } }
             },
-            // Ctrl up
             new INPUT
             {
                 type = INPUT_KEYBOARD,
-                U = new InputUnion
-                {
-                    ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP }
-                }
+                U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } }
             }
         };
 
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        SendInput((uint)kbInputs.Length, kbInputs, Marshal.SizeOf<INPUT>());
     }
 }

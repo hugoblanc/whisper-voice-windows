@@ -117,8 +117,19 @@ public class AudioRecorder : IDisposable
         _isRecording = false;
         _waveIn?.StopRecording();
 
-        // Wait for file to be fully written (max 2 seconds)
-        _recordingStoppedEvent.WaitOne(2000);
+        // Wait for file to be fully written (max 5 seconds)
+        if (!_recordingStoppedEvent.WaitOne(5000))
+        {
+            // Timeout: force cleanup so the file is released
+            Logger.Warn("Recording stop timed out, forcing cleanup");
+            lock (_lock)
+            {
+                _writer?.Dispose();
+                _writer = null;
+                _waveIn?.Dispose();
+                _waveIn = null;
+            }
+        }
 
         return _tempFilePath;
     }
