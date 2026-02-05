@@ -189,14 +189,12 @@ public class WhisperVoiceApp : Form
                 Logger.Info($"Transcription received: {text.Length} chars");
                 Logger.Debug($"Transcription text: {text}");
                 ClipboardPaste.Paste(text);
-
-                var preview = text.Length > 50 ? text[..50] + "..." : text;
-                _trayIcon.ShowNotification("Transcription Complete", preview);
+                // No notification - text is already pasted at cursor
             }
             else
             {
                 Logger.Warn("Transcription returned empty text");
-                _trayIcon.ShowNotification("No Speech Detected", "The recording was empty or contained no speech.");
+                // No notification for empty - just log it
             }
         }
         catch (Exception ex)

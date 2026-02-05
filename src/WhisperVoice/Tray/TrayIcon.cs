@@ -117,16 +117,28 @@ public class TrayIcon : IDisposable
 
             Icon icon;
 
-            // Try to load from file first
-            var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", $"{name}.ico");
-            if (File.Exists(iconPath))
+            // Try to load from embedded resources first
+            var assembly = typeof(TrayIcon).Assembly;
+            var resourceName = $"{name}.ico";
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+
+            if (stream != null)
             {
-                icon = new Icon(iconPath);
+                icon = new Icon(stream);
             }
             else
             {
-                // Generate simple colored icon programmatically
-                icon = GenerateIcon(name);
+                // Fallback: try file path (for development)
+                var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", $"{name}.ico");
+                if (File.Exists(iconPath))
+                {
+                    icon = new Icon(iconPath);
+                }
+                else
+                {
+                    // Last resort: generate simple colored icon
+                    icon = GenerateIcon(name);
+                }
             }
 
             _iconCache[name] = icon;
