@@ -89,7 +89,8 @@ public class SetupWizard : Form
         };
         _shortcutCombo.Items.AddRange(new object[]
         {
-            "Alt+Space (recommended)",
+            "Ctrl+Shift+Space (recommended)",
+            "Alt+Space",
             "Ctrl+Space",
             "Win+Shift+Space"
         });
@@ -164,19 +165,20 @@ public class SetupWizard : Form
             return;
         }
 
-        if (!apiKey.StartsWith("sk-"))
+        if (!apiKey.StartsWith("sk-") && !apiKey.StartsWith("sk-proj-"))
         {
-            _statusLabel.Text = "Invalid API key format. Should start with 'sk-'.";
+            _statusLabel.Text = "Invalid API key format. Should start with 'sk-' or 'sk-proj-'.";
             return;
         }
 
         // Parse shortcut
         uint shortcutModifiers = _shortcutCombo.SelectedIndex switch
         {
-            0 => 0x0001, // MOD_ALT
-            1 => 0x0002, // MOD_CONTROL
-            2 => 0x000C, // MOD_WIN | MOD_SHIFT
-            _ => 0x0001
+            0 => 0x0006, // MOD_CONTROL | MOD_SHIFT (Ctrl+Shift+Space - recommended, no conflicts)
+            1 => 0x0001, // MOD_ALT (Alt+Space - may conflict with Windows system menu)
+            2 => 0x0002, // MOD_CONTROL (Ctrl+Space - may conflict with IME)
+            3 => 0x000C, // MOD_WIN | MOD_SHIFT
+            _ => 0x0006
         };
 
         // Parse PTT key

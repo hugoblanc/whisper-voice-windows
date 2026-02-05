@@ -31,9 +31,9 @@ dotnet publish -c Release
 
 ## Usage
 
-### Toggle Mode (Default: Alt+Space)
-- Press **Alt+Space** to start recording
-- Press **Alt+Space** again to stop and transcribe
+### Toggle Mode (Default: Ctrl+Shift+Space)
+- Press **Ctrl+Shift+Space** to start recording
+- Press **Ctrl+Shift+Space** again to stop and transcribe
 - Text is automatically pasted at cursor
 
 ### Push-to-Talk Mode (Default: F3)

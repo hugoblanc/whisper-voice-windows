@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace WhisperVoice.Tray;
 
 public enum AppState
@@ -9,10 +11,17 @@ public enum AppState
 
 public class TrayIcon : IDisposable
 {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool DestroyIcon(IntPtr handle);
+
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _statusMenuItem;
     private readonly string _toggleShortcut;
     private readonly string _pttKey;
+
+    // Cache icons to avoid repeated generation and GDI handle leaks
+    private static readonly Dictionary<string, Icon> _iconCache = new();
+    private static readonly object _iconLock = new();
 
     private AppState _currentState = AppState.Idle;
 
@@ -79,15 +88,31 @@ public class TrayIcon : IDisposable
 
     private static Icon LoadIcon(string name)
     {
-        // Try to load from file first
-        var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", $"{name}.ico");
-        if (File.Exists(iconPath))
+        lock (_iconLock)
         {
-            return new Icon(iconPath);
-        }
+            // Return cached icon if available
+            if (_iconCache.TryGetValue(name, out var cachedIcon))
+            {
+                return cachedIcon;
+            }
 
-        // Generate simple colored icon programmatically
-        return GenerateIcon(name);
+            Icon icon;
+
+            // Try to load from file first
+            var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", $"{name}.ico");
+            if (File.Exists(iconPath))
+            {
+                icon = new Icon(iconPath);
+            }
+            else
+            {
+                // Generate simple colored icon programmatically
+                icon = GenerateIcon(name);
+            }
+
+            _iconCache[name] = icon;
+            return icon;
+        }
     }
 
     private static Icon GenerateIcon(string name)
@@ -99,30 +124,46 @@ public class TrayIcon : IDisposable
             _ => Color.Gray // mic_idle
         };
 
-        using var bitmap = new Bitmap(16, 16);
-        using var g = Graphics.FromImage(bitmap);
+        var bitmap = new Bitmap(16, 16);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
 
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.Clear(Color.Transparent);
+            // Draw microphone shape
+            using var brush = new SolidBrush(color);
 
-        // Draw microphone shape
-        using var brush = new SolidBrush(color);
+            // Mic head (rounded rectangle)
+            g.FillEllipse(brush, 4, 1, 8, 8);
 
-        // Mic head (rounded rectangle)
-        g.FillEllipse(brush, 4, 1, 8, 8);
+            // Mic stem
+            g.FillRectangle(brush, 6, 9, 4, 3);
 
-        // Mic stem
-        g.FillRectangle(brush, 6, 9, 4, 3);
+            // Mic base
+            g.FillRectangle(brush, 4, 12, 8, 2);
+        }
 
-        // Mic base
-        g.FillRectangle(brush, 4, 12, 8, 2);
+        var hIcon = bitmap.GetHicon();
+        var icon = Icon.FromHandle(hIcon).Clone() as Icon;
+        DestroyIcon(hIcon); // Clean up the unmanaged handle
+        bitmap.Dispose();
 
-        return Icon.FromHandle(bitmap.GetHicon());
+        return icon!;
     }
 
     public void Dispose()
     {
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+
+        // Clean up cached icons
+        lock (_iconLock)
+        {
+            foreach (var icon in _iconCache.Values)
+            {
+                icon.Dispose();
+            }
+            _iconCache.Clear();
+        }
     }
 }

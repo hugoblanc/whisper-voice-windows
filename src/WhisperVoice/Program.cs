@@ -1,4 +1,5 @@
 using WhisperVoice;
+using WhisperVoice.Audio;
 using WhisperVoice.Config;
 
 namespace WhisperVoice;
@@ -8,6 +9,19 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Prevent multiple instances - check FIRST before anything else
+        using var mutex = new Mutex(true, "WhisperVoice-SingleInstance", out bool createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show(
+                "Whisper Voice is already running.\n\nCheck the system tray.",
+                "Whisper Voice",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+            return;
+        }
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
@@ -25,17 +39,20 @@ internal static class Program
             config = wizard.Result;
         }
 
-        // Prevent multiple instances
-        using var mutex = new Mutex(true, "WhisperVoice-SingleInstance", out bool createdNew);
-        if (!createdNew)
+        // Check microphone availability at startup
+        var micError = AudioRecorder.GetMicrophoneError();
+        if (micError != null)
         {
-            MessageBox.Show(
-                "Whisper Voice is already running.\n\nCheck the system tray.",
-                "Whisper Voice",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
+            var result = MessageBox.Show(
+                $"{micError}\n\nDo you want to continue anyway?",
+                "Whisper Voice - Microphone Warning",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
             );
-            return;
+            if (result == DialogResult.No)
+            {
+                return;
+            }
         }
 
         try

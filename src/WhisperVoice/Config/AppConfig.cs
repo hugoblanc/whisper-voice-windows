@@ -5,7 +5,7 @@ namespace WhisperVoice.Config;
 public class AppConfig
 {
     public string ApiKey { get; set; } = string.Empty;
-    public uint ShortcutModifiers { get; set; } = 0x0001; // MOD_ALT
+    public uint ShortcutModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT (Ctrl+Shift)
     public uint ShortcutKeyCode { get; set; } = 0x20;     // VK_SPACE
     public uint PushToTalkKeyCode { get; set; } = 0x72;   // VK_F3
 

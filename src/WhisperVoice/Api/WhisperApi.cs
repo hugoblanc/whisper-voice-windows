@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Net.NetworkInformation;
 
 namespace WhisperVoice.Api;
 
@@ -13,6 +15,11 @@ public class WhisperApi
 
     private readonly string _apiKey;
     private readonly HttpClient _httpClient;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true // Handle both "text" and "Text"
+    };
 
     public WhisperApi(string apiKey)
     {
@@ -32,6 +39,10 @@ public class WhisperApi
 
         if (fileInfo.Length < MinFileSizeBytes)
             throw new InvalidOperationException("Recording too short or empty");
+
+        // Check network connectivity
+        if (!IsNetworkAvailable())
+            throw new InvalidOperationException("No internet connection. Please check your network.");
 
         Exception? lastException = null;
 
@@ -54,7 +65,42 @@ public class WhisperApi
             }
         }
 
-        throw lastException ?? new InvalidOperationException("Transcription failed after retries");
+        throw FormatException(lastException);
+    }
+
+    private static bool IsNetworkAvailable()
+    {
+        try
+        {
+            return NetworkInterface.GetIsNetworkAvailable();
+        }
+        catch
+        {
+            return true; // Assume available if check fails
+        }
+    }
+
+    private static Exception FormatException(Exception? ex)
+    {
+        if (ex == null)
+            return new InvalidOperationException("Transcription failed after retries");
+
+        // Make error messages more user-friendly
+        var message = ex.Message;
+
+        if (message.Contains("401"))
+            return new InvalidOperationException("Invalid API key. Please check your OpenAI API key in settings.");
+
+        if (message.Contains("429"))
+            return new InvalidOperationException("Rate limit exceeded. Please wait a moment and try again.");
+
+        if (message.Contains("insufficient_quota") || message.Contains("402"))
+            return new InvalidOperationException("No API credits remaining. Please add credits to your OpenAI account.");
+
+        if (ex is TaskCanceledException)
+            return new InvalidOperationException("Request timed out. Please check your internet connection.");
+
+        return ex;
     }
 
     private async Task<string> SendTranscriptionRequestAsync(string audioFilePath)
@@ -77,15 +123,15 @@ public class WhisperApi
         }
 
         var responseJson = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<TranscriptionResponse>(responseJson);
+        var result = JsonSerializer.Deserialize<TranscriptionResponse>(responseJson, JsonOptions);
 
         return result?.Text ?? throw new InvalidOperationException("Empty transcription response");
     }
 
     private static bool IsRetryableError(HttpRequestException ex)
     {
-        // Retry on 5xx server errors
-        if (ex.Message.Contains("5"))
+        // Retry on 5xx server errors and network errors
+        if (ex.Message.Contains("5") || ex.Message.Contains("network"))
             return true;
 
         return false;
@@ -93,6 +139,7 @@ public class WhisperApi
 
     private class TranscriptionResponse
     {
+        [JsonPropertyName("text")]
         public string? Text { get; set; }
     }
 }

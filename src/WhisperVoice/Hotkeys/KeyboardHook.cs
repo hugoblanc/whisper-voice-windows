@@ -25,7 +25,9 @@ public class KeyboardHook : IDisposable
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+    // IMPORTANT: Must keep reference to prevent garbage collection
     private readonly LowLevelKeyboardProc _proc;
+    private GCHandle _procHandle;
     private IntPtr _hookId = IntPtr.Zero;
     private uint _watchedKeyCode;
     private bool _keyIsDown;
@@ -36,6 +38,8 @@ public class KeyboardHook : IDisposable
     public KeyboardHook()
     {
         _proc = HookCallback;
+        // Pin the delegate to prevent GC from collecting it
+        _procHandle = GCHandle.Alloc(_proc);
     }
 
     public void Start(uint keyCode)
@@ -96,5 +100,9 @@ public class KeyboardHook : IDisposable
     public void Dispose()
     {
         Stop();
+        if (_procHandle.IsAllocated)
+        {
+            _procHandle.Free();
+        }
     }
 }

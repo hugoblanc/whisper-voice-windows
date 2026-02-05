@@ -39,8 +39,19 @@ public static class ClipboardPaste
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        // Copy text to clipboard
-        System.Windows.Forms.Clipboard.SetText(text);
+        // Copy text to clipboard (must be on STA thread)
+        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+        {
+            System.Windows.Forms.Clipboard.SetText(text);
+        }
+        else
+        {
+            // If not on STA thread, invoke on one
+            var thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join(1000); // Wait max 1 second
+        }
 
         // Small delay before pasting (like macOS version)
         Thread.Sleep(100);

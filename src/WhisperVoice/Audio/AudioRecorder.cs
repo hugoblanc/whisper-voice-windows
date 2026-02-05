@@ -8,39 +8,99 @@ public class AudioRecorder : IDisposable
     private WaveFileWriter? _writer;
     private string? _tempFilePath;
     private bool _isRecording;
+    private readonly ManualResetEvent _recordingStoppedEvent = new(true);
+    private readonly object _lock = new();
 
     public bool IsRecording => _isRecording;
+
+    public static bool IsMicrophoneAvailable()
+    {
+        try
+        {
+            return WaveInEvent.DeviceCount > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static string? GetMicrophoneError()
+    {
+        if (WaveInEvent.DeviceCount == 0)
+            return "No microphone detected. Please connect a microphone and restart the app.";
+
+        // Check Windows microphone permission
+        try
+        {
+            using var testWaveIn = new WaveInEvent();
+            testWaveIn.WaveFormat = new WaveFormat(16000, 16, 1);
+            // Just creating it tests basic access
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message.Contains("denied") || ex.Message.Contains("access"))
+                return "Microphone access denied. Please allow microphone access in Windows Settings > Privacy > Microphone.";
+            return $"Microphone error: {ex.Message}";
+        }
+
+        return null;
+    }
 
     public void StartRecording()
     {
         if (_isRecording) return;
 
-        var tempDir = Path.Combine(Path.GetTempPath(), "WhisperVoice");
-        Directory.CreateDirectory(tempDir);
-        _tempFilePath = Path.Combine(tempDir, $"recording_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
+        // Wait for any previous recording to fully stop
+        _recordingStoppedEvent.WaitOne(2000);
 
-        _waveIn = new WaveInEvent
+        lock (_lock)
         {
-            WaveFormat = new WaveFormat(16000, 16, 1) // 16kHz, 16-bit, mono
-        };
+            if (_isRecording) return;
 
-        _writer = new WaveFileWriter(_tempFilePath, _waveIn.WaveFormat);
+            if (!IsMicrophoneAvailable())
+            {
+                throw new InvalidOperationException(GetMicrophoneError() ?? "No microphone available");
+            }
 
-        _waveIn.DataAvailable += (sender, e) =>
+            var tempDir = Path.Combine(Path.GetTempPath(), "WhisperVoice");
+            Directory.CreateDirectory(tempDir);
+            _tempFilePath = Path.Combine(tempDir, $"recording_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
+
+            _waveIn = new WaveInEvent
+            {
+                WaveFormat = new WaveFormat(16000, 16, 1) // 16kHz, 16-bit, mono
+            };
+
+            _writer = new WaveFileWriter(_tempFilePath, _waveIn.WaveFormat);
+            _recordingStoppedEvent.Reset();
+
+            _waveIn.DataAvailable += OnDataAvailable;
+            _waveIn.RecordingStopped += OnRecordingStopped;
+
+            _waveIn.StartRecording();
+            _isRecording = true;
+        }
+    }
+
+    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        lock (_lock)
         {
             _writer?.Write(e.Buffer, 0, e.BytesRecorded);
-        };
+        }
+    }
 
-        _waveIn.RecordingStopped += (sender, e) =>
+    private void OnRecordingStopped(object? sender, StoppedEventArgs e)
+    {
+        lock (_lock)
         {
             _writer?.Dispose();
             _writer = null;
             _waveIn?.Dispose();
             _waveIn = null;
-        };
-
-        _waveIn.StartRecording();
-        _isRecording = true;
+        }
+        _recordingStoppedEvent.Set();
     }
 
     public string? StopRecording()
@@ -49,6 +109,9 @@ public class AudioRecorder : IDisposable
 
         _isRecording = false;
         _waveIn?.StopRecording();
+
+        // Wait for file to be fully written (max 2 seconds)
+        _recordingStoppedEvent.WaitOne(2000);
 
         return _tempFilePath;
     }

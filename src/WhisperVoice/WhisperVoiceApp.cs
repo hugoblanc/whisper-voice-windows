@@ -50,16 +50,17 @@ public class WhisperVoiceApp : Form
 
     private void SetupHotkeys()
     {
-        // Register toggle hotkey (Alt+Space by default)
+        var errors = new List<string>();
+
+        // Register toggle hotkey (Ctrl+Shift+Space by default)
         try
         {
             _toggleHotkeyId = _globalHotkey.Register(_config.ShortcutModifiers, _config.ShortcutKeyCode);
         }
         catch (Exception ex)
         {
-            _trayIcon.ShowNotification("Hotkey Error",
-                $"Failed to register toggle shortcut: {ex.Message}",
-                ToolTipIcon.Error);
+            var shortcut = _config.GetToggleShortcutDescription();
+            errors.Add($"Toggle shortcut ({shortcut}): Another app may be using this shortcut. Try a different one in config.");
         }
 
         // Setup push-to-talk keyboard hook
@@ -72,9 +73,18 @@ public class WhisperVoiceApp : Form
         }
         catch (Exception ex)
         {
-            _trayIcon.ShowNotification("Keyboard Hook Error",
-                $"Failed to start PTT hook: {ex.Message}",
-                ToolTipIcon.Error);
+            var pttKey = _config.GetPushToTalkKeyDescription();
+            errors.Add($"Push-to-Talk ({pttKey}): Failed to install keyboard hook. Your antivirus may be blocking it.");
+        }
+
+        // Show consolidated error notification
+        if (errors.Count > 0)
+        {
+            _trayIcon.ShowNotification(
+                "Hotkey Setup Warning",
+                string.Join("\n", errors),
+                ToolTipIcon.Warning
+            );
         }
     }
 
