@@ -38,4 +38,12 @@ public class MistralProvider : BaseTranscriptionProvider
         errorMessage = null;
         return true;
     }
+
+    protected override async Task TestApiCredentialsAsync()
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        client.DefaultRequestHeaders.Add("x-api-key", _apiKey);
+        var response = await client.GetAsync("https://api.mistral.ai/v1/models");
+        response.EnsureSuccessStatusCode();
+    }
 }

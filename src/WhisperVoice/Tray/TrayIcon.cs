@@ -17,8 +17,10 @@ public class TrayIcon : IDisposable
 
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _statusMenuItem;
-    private readonly string _toggleShortcut;
-    private readonly string _pttKey;
+    private readonly ToolStripMenuItem _toggleMenuItem;
+    private readonly ToolStripMenuItem _pttMenuItem;
+    private string _toggleShortcut;
+    private string _pttKey;
 
     // Cache icons to avoid repeated generation and GDI handle leaks
     private static readonly Dictionary<string, Icon> _iconCache = new();
@@ -27,6 +29,7 @@ public class TrayIcon : IDisposable
     private AppState _currentState = AppState.Idle;
 
     public event Action? QuitRequested;
+    public event Action? PreferencesRequested;
 
     public TrayIcon(string toggleShortcut, string pttKey)
     {
@@ -42,20 +45,33 @@ public class TrayIcon : IDisposable
 
         var contextMenu = new ContextMenuStrip();
 
-        contextMenu.Items.Add($"{_toggleShortcut} to toggle", null, null!);
-        contextMenu.Items.Add($"{_pttKey} (hold) to record", null, null!);
+        _toggleMenuItem = new ToolStripMenuItem($"{_toggleShortcut} to toggle") { Enabled = false };
+        _pttMenuItem = new ToolStripMenuItem($"{_pttKey} (hold) to record") { Enabled = false };
+        contextMenu.Items.Add(_toggleMenuItem);
+        contextMenu.Items.Add(_pttMenuItem);
         contextMenu.Items.Add(new ToolStripSeparator());
 
         _statusMenuItem = new ToolStripMenuItem("Status: Idle") { Enabled = false };
         contextMenu.Items.Add(_statusMenuItem);
 
         contextMenu.Items.Add(new ToolStripSeparator());
+        contextMenu.Items.Add("Preferences...", null, (_, _) => PreferencesRequested?.Invoke());
+        contextMenu.Items.Add(new ToolStripSeparator());
+
         var versionItem = new ToolStripMenuItem($"Version {Logger.Version}") { Enabled = false };
         contextMenu.Items.Add(versionItem);
         contextMenu.Items.Add("Open Logs", null, (_, _) => Logger.OpenLogFile());
         contextMenu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
 
         _notifyIcon.ContextMenuStrip = contextMenu;
+    }
+
+    public void UpdateShortcutLabels(string toggleShortcut, string pttKey)
+    {
+        _toggleShortcut = toggleShortcut;
+        _pttKey = pttKey;
+        _toggleMenuItem.Text = $"{toggleShortcut} to toggle";
+        _pttMenuItem.Text = $"{pttKey} (hold) to record";
     }
 
     public void SetState(AppState state)

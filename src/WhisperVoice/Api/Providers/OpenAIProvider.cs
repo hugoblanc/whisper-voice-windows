@@ -39,4 +39,12 @@ public class OpenAIProvider : BaseTranscriptionProvider
         errorMessage = null;
         return true;
     }
+
+    protected override async Task TestApiCredentialsAsync()
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        var response = await client.GetAsync("https://api.openai.com/v1/models");
+        response.EnsureSuccessStatusCode();
+    }
 }

@@ -9,7 +9,7 @@ public static class Logger
     private static readonly string _logFilePath;
     private static bool _initialized;
 
-    public const string Version = "2.2.0";
+    public const string Version = "2.3.0";
 
     static Logger()
     {

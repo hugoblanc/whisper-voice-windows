@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Net.NetworkInformation;
 using WhisperVoice.Logging;
 
 namespace WhisperVoice.Api;
@@ -84,7 +84,7 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
         }
     }
 
-    private static bool IsNetworkAvailable()
+    protected static bool IsNetworkAvailable()
     {
         try
         {
@@ -95,6 +95,44 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
             return true; // Assume available if check fails
         }
     }
+
+    public virtual async Task<(bool Success, string? ErrorMessage)> TestConnectionAsync()
+    {
+        try
+        {
+            if (!IsNetworkAvailable())
+                return (false, "No internet connection");
+
+            await TestApiCredentialsAsync();
+            return (true, null);
+        }
+        catch (HttpRequestException ex) when (ex.Message.Contains("401"))
+        {
+            return (false, "Invalid API key");
+        }
+        catch (HttpRequestException ex) when (ex.Message.Contains("402") || ex.Message.Contains("insufficient_quota"))
+        {
+            return (false, "No API credits remaining");
+        }
+        catch (HttpRequestException ex) when (ex.Message.Contains("403"))
+        {
+            return (false, "API key does not have access to this model");
+        }
+        catch (TaskCanceledException)
+        {
+            return (false, "Connection timed out");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Test API credentials by making a lightweight API call.
+    /// Override in providers to use provider-specific endpoints.
+    /// </summary>
+    protected abstract Task TestApiCredentialsAsync();
 
     protected async Task<string> TranscribeWithRetryAsync(string audioFilePath)
     {

@@ -28,6 +28,12 @@ public interface ITranscriptionProvider
     /// <param name="audioFilePath">Path to the audio file (WAV format)</param>
     /// <returns>Transcribed text</returns>
     Task<string> TranscribeAsync(string audioFilePath);
+
+    /// <summary>
+    /// Test the API connection and credentials
+    /// </summary>
+    /// <returns>Tuple of (success, error message if failed)</returns>
+    Task<(bool Success, string? ErrorMessage)> TestConnectionAsync();
 }
 
 /// <summary>
