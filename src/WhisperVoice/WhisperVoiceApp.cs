@@ -4,7 +4,9 @@ using WhisperVoice.Clipboard;
 using WhisperVoice.Config;
 using WhisperVoice.Hotkeys;
 using WhisperVoice.Logging;
+using WhisperVoice.Processing;
 using WhisperVoice.Tray;
+using WhisperVoice.UI;
 
 namespace WhisperVoice;
 
@@ -16,13 +18,18 @@ public class WhisperVoiceApp : Form
     private ITranscriptionProvider _transcriptionProvider;
     private readonly GlobalHotkey _globalHotkey;
     private readonly KeyboardHook _keyboardHook;
+    private readonly KeyboardHook _shiftHook;
+    private readonly ModeManager _modeManager;
+    private readonly TextProcessor _textProcessor;
 
     private AppState _state = AppState.Idle;
     private int _toggleHotkeyId;
     private System.Windows.Forms.Timer? _timeoutTimer;
     private PreferencesWindow? _preferencesWindow;
+    private RecordingWindow? _recordingWindow;
 
     private const int TimeoutSeconds = 45;
+    private const uint VK_SHIFT = 0x10;
 
     public WhisperVoiceApp(AppConfig config)
     {
@@ -39,17 +46,31 @@ public class WhisperVoiceApp : Form
         _transcriptionProvider = TranscriptionProviderFactory.Create(config);
         Logger.Info($"Using transcription provider: {_transcriptionProvider.DisplayName}");
 
+        // Initialize AI processing
+        _modeManager = new ModeManager(() => _config.HasOpenAIKeyForProcessing);
+        _modeManager.ModeChanged += OnModeChanged;
+        _textProcessor = new TextProcessor();
+
         _trayIcon = new TrayIcon(
             config.GetToggleShortcutDescription(),
-            config.GetPushToTalkKeyDescription()
+            config.GetPushToTalkKeyDescription(),
+            _modeManager.CurrentMode.Name,
+            _modeManager.HasAIModesAvailable
         );
         _trayIcon.QuitRequested += () => Application.Exit();
         _trayIcon.PreferencesRequested += ShowPreferences;
 
         _globalHotkey = new GlobalHotkey(Handle);
         _keyboardHook = new KeyboardHook();
+        _shiftHook = new KeyboardHook();
 
         SetupHotkeys();
+    }
+
+    private void OnModeChanged(AIMode mode)
+    {
+        _trayIcon.UpdateModeLabel(mode.Name);
+        _recordingWindow?.SetMode(mode.Name);
     }
 
     private void SetupHotkeys()
@@ -85,6 +106,19 @@ public class WhisperVoiceApp : Form
         {
             Logger.Error($"Failed to install PTT keyboard hook for: {pttKey}", ex);
             errors.Add($"Push-to-Talk ({pttKey}): Failed to install keyboard hook. Your antivirus may be blocking it.");
+        }
+
+        // Setup Shift key hook for mode switching during recording
+        _shiftHook.KeyDown += OnShiftKeyDown;
+        try
+        {
+            _shiftHook.Start(VK_SHIFT);
+            Logger.Info("Shift key hook installed for mode switching");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to install Shift key hook: {ex.Message}");
+            // Non-critical, don't show error to user
         }
 
         // Show consolidated error notification
@@ -140,6 +174,16 @@ public class WhisperVoiceApp : Form
         }
     }
 
+    private void OnShiftKeyDown()
+    {
+        // Only switch modes while recording
+        if (_state == AppState.Recording)
+        {
+            var newMode = _modeManager.NextMode();
+            Logger.Info($"Mode switched to: {newMode.Name}");
+        }
+    }
+
     private void StartRecording()
     {
         if (_state != AppState.Idle) return;
@@ -150,7 +194,9 @@ public class WhisperVoiceApp : Form
             _recorder.StartRecording();
             SetState(AppState.Recording);
             Logger.Info("Recording started successfully");
-            // No notification - icon change is enough feedback
+
+            // Show recording window
+            ShowRecordingWindow();
         }
         catch (Exception ex)
         {
@@ -159,14 +205,53 @@ public class WhisperVoiceApp : Form
         }
     }
 
+    private void ShowRecordingWindow()
+    {
+        // Close existing window if any
+        _recordingWindow?.Close();
+
+        _recordingWindow = new RecordingWindow();
+        _recordingWindow.SetMode(_modeManager.CurrentMode.Name);
+        _recordingWindow.CancelRequested += OnRecordingCancelled;
+        _recordingWindow.FormClosed += (_, _) => _recordingWindow = null;
+        _recordingWindow.Show();
+    }
+
+    private void OnRecordingCancelled()
+    {
+        Logger.Info("Recording cancelled by user");
+        if (_state == AppState.Recording)
+        {
+            _recorder.StopRecording();
+            CloseRecordingWindow();
+            SetState(AppState.Idle);
+        }
+    }
+
+    private void CloseRecordingWindow()
+    {
+        if (_recordingWindow != null && !_recordingWindow.IsDisposed)
+        {
+            if (_recordingWindow.InvokeRequired)
+                _recordingWindow.Invoke(() => _recordingWindow.Close());
+            else
+                _recordingWindow.Close();
+        }
+        _recordingWindow = null;
+    }
+
     private async void StopRecordingAndTranscribe()
     {
         if (_state != AppState.Recording) return;
 
+        // Capture current mode before stopping (it might change)
+        var currentMode = _modeManager.CurrentMode;
+
         Logger.Info("Stopping recording...");
         var audioPath = _recorder.StopRecording();
         SetState(AppState.Transcribing);
-        Logger.Info($"Recording stopped. Audio file: {audioPath}");
+        _recordingWindow?.SetState(AppState.Transcribing);
+        Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
 
         // Start timeout timer
         StartTimeoutTimer();
@@ -181,21 +266,45 @@ public class WhisperVoiceApp : Form
             var fileInfo = new FileInfo(audioPath);
             Logger.Info($"Audio file size: {fileInfo.Length} bytes");
 
+            // Step 1: Transcribe audio
             Logger.Info($"Sending audio to {_transcriptionProvider.DisplayName}...");
             var text = await _transcriptionProvider.TranscribeAsync(audioPath);
 
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                Logger.Info($"Transcription received: {text.Length} chars");
-                Logger.Debug($"Transcription text: {text}");
-                ClipboardPaste.Paste(text);
-                // No notification - text is already pasted at cursor
-            }
-            else
+            if (string.IsNullOrWhiteSpace(text))
             {
                 Logger.Warn("Transcription returned empty text");
-                // No notification for empty - just log it
+                return;
             }
+
+            Logger.Info($"Transcription received: {text.Length} chars");
+            Logger.Debug($"Transcription text: {text}");
+
+            // Step 2: Apply AI processing if mode requires it
+            if (currentMode.RequiresProcessing)
+            {
+                var apiKey = _config.GetOpenAIKeyForProcessing();
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    try
+                    {
+                        text = await _textProcessor.ProcessAsync(text, currentMode, apiKey);
+                        Logger.Info($"AI processing complete: {text.Length} chars");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"AI processing failed, using raw transcription: {ex.Message}");
+                        // Continue with raw transcription
+                    }
+                }
+                else
+                {
+                    Logger.Warn("AI mode selected but no OpenAI key available");
+                }
+            }
+
+            // Step 3: Paste result
+            ClipboardPaste.Paste(text);
+            // No notification - text is already pasted at cursor
         }
         catch (Exception ex)
         {
@@ -206,6 +315,7 @@ public class WhisperVoiceApp : Form
         {
             StopTimeoutTimer();
             AudioRecorder.CleanupTempFile(audioPath);
+            CloseRecordingWindow();
             SetState(AppState.Idle);
         }
     }
@@ -315,6 +425,7 @@ public class WhisperVoiceApp : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        _shiftHook.Dispose();
         _keyboardHook.Dispose();
         _globalHotkey.Dispose();
         _recorder.Dispose();

@@ -19,8 +19,10 @@ public class TrayIcon : IDisposable
     private readonly ToolStripMenuItem _statusMenuItem;
     private readonly ToolStripMenuItem _toggleMenuItem;
     private readonly ToolStripMenuItem _pttMenuItem;
+    private readonly ToolStripMenuItem _modeMenuItem;
     private string _toggleShortcut;
     private string _pttKey;
+    private string _currentMode;
 
     // Cache icons to avoid repeated generation and GDI handle leaks
     private static readonly Dictionary<string, Icon> _iconCache = new();
@@ -31,10 +33,11 @@ public class TrayIcon : IDisposable
     public event Action? QuitRequested;
     public event Action? PreferencesRequested;
 
-    public TrayIcon(string toggleShortcut, string pttKey)
+    public TrayIcon(string toggleShortcut, string pttKey, string currentMode = "Brut", bool hasAIModes = false)
     {
         _toggleShortcut = toggleShortcut;
         _pttKey = pttKey;
+        _currentMode = currentMode;
 
         _notifyIcon = new NotifyIcon
         {
@@ -54,6 +57,13 @@ public class TrayIcon : IDisposable
         _statusMenuItem = new ToolStripMenuItem("Status: Idle") { Enabled = false };
         contextMenu.Items.Add(_statusMenuItem);
 
+        // AI Mode indicator
+        var modeText = hasAIModes
+            ? $"Mode: {_currentMode} (Shift to switch)"
+            : $"Mode: {_currentMode} (add OpenAI key for AI modes)";
+        _modeMenuItem = new ToolStripMenuItem(modeText) { Enabled = false };
+        contextMenu.Items.Add(_modeMenuItem);
+
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add("Preferences...", null, (_, _) => PreferencesRequested?.Invoke());
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -72,6 +82,12 @@ public class TrayIcon : IDisposable
         _pttKey = pttKey;
         _toggleMenuItem.Text = $"{toggleShortcut} to toggle";
         _pttMenuItem.Text = $"{pttKey} (hold) to record";
+    }
+
+    public void UpdateModeLabel(string modeName)
+    {
+        _currentMode = modeName;
+        _modeMenuItem.Text = $"Mode: {modeName} (Shift to switch)";
     }
 
     public void SetState(AppState state)

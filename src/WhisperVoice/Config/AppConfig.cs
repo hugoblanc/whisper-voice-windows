@@ -28,6 +28,34 @@ public class AppConfig
     /// </summary>
     public string GetCurrentApiKey() => GetApiKeyForProvider(Provider);
 
+    /// <summary>
+    /// Get OpenAI API key for AI processing modes.
+    /// Returns the key from providerApiKeys.openai, or the main apiKey if using OpenAI as provider.
+    /// </summary>
+    public string? GetOpenAIKeyForProcessing()
+    {
+        // First check providerApiKeys for explicit OpenAI key
+        if (ProviderApiKeys?.TryGetValue("openai", out var key) == true &&
+            !string.IsNullOrEmpty(key) &&
+            key.StartsWith("sk-"))
+        {
+            return key;
+        }
+
+        // Fall back to main apiKey if using OpenAI as provider
+        if (Provider == "openai" && !string.IsNullOrEmpty(ApiKey) && ApiKey.StartsWith("sk-"))
+        {
+            return ApiKey;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Check if AI processing modes are available (requires OpenAI key)
+    /// </summary>
+    public bool HasOpenAIKeyForProcessing => !string.IsNullOrEmpty(GetOpenAIKeyForProcessing());
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
