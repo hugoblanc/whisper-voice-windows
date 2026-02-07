@@ -11,7 +11,8 @@ public static class TranscriptionProviderFactory
     private static readonly Dictionary<string, Func<string, ITranscriptionProvider>> _providers = new()
     {
         ["openai"] = apiKey => new OpenAIProvider(apiKey),
-        ["mistral"] = apiKey => new MistralProvider(apiKey)
+        ["mistral"] = apiKey => new MistralProvider(apiKey),
+        ["local"] = _ => new LocalWhisperProvider(GetLocalModelPath())
     };
 
     /// <summary>
@@ -22,8 +23,33 @@ public static class TranscriptionProviderFactory
         return new List<ProviderInfo>
         {
             new("openai", "OpenAI Whisper", "https://platform.openai.com/api-keys"),
-            new("mistral", "Mistral Voxtral", "https://console.mistral.ai/api-keys")
+            new("mistral", "Mistral Voxtral", "https://console.mistral.ai/api-keys"),
+            new("local", "Local (Offline)", "") // No API key URL for local
         };
+    }
+
+    /// <summary>
+    /// Get the path to the selected Whisper model for local transcription
+    /// </summary>
+    private static string GetLocalModelPath()
+    {
+        // Check for default model (base model is a good balance)
+        var defaultModel = WhisperModel.AvailableModels[1]; // Base model
+        if (defaultModel.IsDownloaded)
+        {
+            return defaultModel.LocalPath;
+        }
+
+        // Look for any downloaded model
+        foreach (var model in WhisperModel.AvailableModels)
+        {
+            if (model.IsDownloaded)
+            {
+                return model.LocalPath;
+            }
+        }
+
+        return ""; // No model downloaded
     }
 
     /// <summary>
