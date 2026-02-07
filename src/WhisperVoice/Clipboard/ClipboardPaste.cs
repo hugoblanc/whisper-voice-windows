@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using WhisperVoice.Logging;
 
 namespace WhisperVoice.Clipboard;
 
@@ -80,7 +81,13 @@ public static class ClipboardPaste
 
     public static void Paste(string text)
     {
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text))
+        {
+            Logger.Warn("ClipboardPaste called with empty text");
+            return;
+        }
+
+        Logger.Debug($"Starting paste operation ({text.Length} chars)");
 
         // Get window under mouse cursor and activate it
         GetCursorPos(out var cursorPos);
@@ -88,6 +95,8 @@ public static class ClipboardPaste
 
         if (targetWindow != IntPtr.Zero)
         {
+            Logger.Debug($"Target window found at cursor position ({cursorPos.X}, {cursorPos.Y})");
+
             // Attach to target window's thread to allow SetForegroundWindow
             var targetThread = GetWindowThreadProcessId(targetWindow, out _);
             var currentThread = GetCurrentThreadId();
@@ -96,10 +105,12 @@ public static class ClipboardPaste
             if (targetThread != currentThread)
             {
                 attached = AttachThreadInput(currentThread, targetThread, true);
+                Logger.Debug($"Attached to target thread (current: {currentThread}, target: {targetThread})");
             }
 
+            // Activate window
             SetForegroundWindow(targetWindow);
-            Thread.Sleep(50);
+            Thread.Sleep(100); // Increased from 50ms
 
             // Click at cursor position to place the text caret there
             SendInput(2, new INPUT[]
@@ -116,30 +127,46 @@ public static class ClipboardPaste
                 }
             }, Marshal.SizeOf<INPUT>());
 
-            Thread.Sleep(50);
+            Thread.Sleep(100); // Increased from 50ms
 
             if (attached)
             {
                 AttachThreadInput(currentThread, targetThread, false);
             }
         }
-
-        // Copy text to clipboard (must be on STA thread)
-        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
-        {
-            System.Windows.Forms.Clipboard.SetText(text);
-        }
         else
         {
-            var thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            thread.Join(1000);
+            Logger.Warn("No target window found under cursor");
         }
 
-        Thread.Sleep(100);
+        // Copy text to clipboard (must be on STA thread)
+        try
+        {
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+            {
+                System.Windows.Forms.Clipboard.SetText(text);
+                Logger.Debug("Text copied to clipboard (STA thread)");
+            }
+            else
+            {
+                var thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                thread.Join(1000);
+                Logger.Debug("Text copied to clipboard (MTA thread)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to copy text to clipboard", ex);
+            return;
+        }
+
+        // Longer delay to ensure clipboard is ready
+        Thread.Sleep(150); // Increased from 100ms
 
         // Simulate Ctrl+V
+        Logger.Debug("Sending Ctrl+V keystroke");
         var kbInputs = new INPUT[]
         {
             new INPUT
@@ -164,6 +191,8 @@ public static class ClipboardPaste
             }
         };
 
-        SendInput((uint)kbInputs.Length, kbInputs, Marshal.SizeOf<INPUT>());
+        var result = SendInput((uint)kbInputs.Length, kbInputs, Marshal.SizeOf<INPUT>());
+        Logger.Debug($"SendInput result: {result} events sent");
+        Logger.Info("Paste operation completed");
     }
 }

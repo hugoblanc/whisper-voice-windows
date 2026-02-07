@@ -341,11 +341,26 @@ public class PreferencesWindow : Form
     {
         if (_providerCombo.SelectedItem is ProviderComboItem item)
         {
-            var host = new Uri(item.Info.ApiKeyHelpUrl).Host;
-            _apiKeyLink.Text = $"Get your API key from {host}";
-            _apiKeyLink.Tag = item.Info.ApiKeyHelpUrl;
-
-            _apiKeyTextBox.PlaceholderText = item.Info.Id == "openai" ? "sk-..." : "Enter API key";
+            // Local provider doesn't need API key
+            if (string.IsNullOrEmpty(item.Info.ApiKeyHelpUrl))
+            {
+                _apiKeyLink.Text = "No API key needed (offline mode)";
+                _apiKeyLink.Tag = null;
+                _apiKeyLink.Enabled = false;
+                _apiKeyTextBox.Enabled = false;
+                _apiKeyTextBox.PlaceholderText = "Not required for local mode";
+                _testButton.Text = "Check Model";
+            }
+            else
+            {
+                var host = new Uri(item.Info.ApiKeyHelpUrl).Host;
+                _apiKeyLink.Text = $"Get your API key from {host}";
+                _apiKeyLink.Tag = item.Info.ApiKeyHelpUrl;
+                _apiKeyLink.Enabled = true;
+                _apiKeyTextBox.Enabled = true;
+                _apiKeyTextBox.PlaceholderText = item.Info.Id == "openai" ? "sk-..." : "Enter API key";
+                _testButton.Text = "Test Connection";
+            }
         }
     }
 
