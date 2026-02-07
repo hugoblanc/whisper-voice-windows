@@ -42,7 +42,7 @@ public class RecordingWindow : Form
         // Window settings
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(320, 180);
+        Size = new Size(400, 220);
         BackColor = BackgroundColor;
         ShowInTaskbar = false;
         TopMost = true;
@@ -54,31 +54,31 @@ public class RecordingWindow : Form
         _timerLabel = new Label
         {
             Text = "0:00",
-            Font = new Font("Segoe UI", 28, FontStyle.Bold),
+            Font = new Font("Segoe UI", 32, FontStyle.Bold),
             ForeColor = TextColor,
             AutoSize = true,
-            Location = new Point(20, 15)
+            Location = new Point(20, 20)
         };
 
         // Mode label
         _modeLabel = new Label
         {
             Text = "Brut",
-            Font = new Font("Segoe UI", 11),
-            ForeColor = Color.FromArgb(180, 180, 180),
+            Font = new Font("Segoe UI", 12),
+            ForeColor = Color.FromArgb(160, 160, 160),
             AutoSize = true,
-            Location = new Point(22, 60)
+            Location = new Point(22, 75)
         };
 
         // Status indicator
         _statusLabel = new Label
         {
             Text = "● Recording",
-            Font = new Font("Segoe UI", 10),
+            Font = new Font("Segoe UI", 11),
             ForeColor = RecordingColor,
             AutoSize = false,
-            Size = new Size(120, 25),
-            Location = new Point(Width - 140, 18),
+            Size = new Size(130, 30),
+            Location = new Point(Width - 150, 25),
             TextAlign = ContentAlignment.TopRight,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
@@ -86,8 +86,8 @@ public class RecordingWindow : Form
         // Waveform panel
         _waveformPanel = new DoubleBufferedPanel
         {
-            Location = new Point(20, 85),
-            Size = new Size(Width - 40, 50),
+            Location = new Point(20, 105),
+            Size = new Size(Width - 40, 60),
             BackColor = Color.FromArgb(45, 45, 45),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -97,16 +97,16 @@ public class RecordingWindow : Form
         _cancelButton = new Button
         {
             Text = "Cancel (Esc)",
-            Font = new Font("Segoe UI", 9),
-            ForeColor = Color.FromArgb(180, 180, 180),
-            BackColor = Color.FromArgb(50, 50, 50),
+            Font = new Font("Segoe UI", 10),
+            ForeColor = Color.FromArgb(200, 200, 200),
+            BackColor = Color.FromArgb(60, 60, 60),
             FlatStyle = FlatStyle.Flat,
-            Size = new Size(100, 28),
-            Location = new Point(Width - 120, 145),
+            Size = new Size(110, 32),
+            Location = new Point(Width - 130, 175),
             Cursor = Cursors.Hand,
             Anchor = AnchorStyles.Bottom | AnchorStyles.Right
         };
-        _cancelButton.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 70);
+        _cancelButton.FlatAppearance.BorderColor = Color.FromArgb(80, 80, 80);
         _cancelButton.Click += (_, _) => CancelRequested?.Invoke();
 
         // Add controls
