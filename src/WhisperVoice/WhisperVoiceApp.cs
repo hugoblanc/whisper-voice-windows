@@ -2,6 +2,7 @@ using WhisperVoice.Api;
 using WhisperVoice.Audio;
 using WhisperVoice.Clipboard;
 using WhisperVoice.Config;
+using WhisperVoice.History;
 using WhisperVoice.Hotkeys;
 using WhisperVoice.Logging;
 using WhisperVoice.Processing;
@@ -24,9 +25,11 @@ public class WhisperVoiceApp : Form
 
     private AppState _state = AppState.Idle;
     private int _toggleHotkeyId;
+    private int _historyHotkeyId;
     private System.Windows.Forms.Timer? _timeoutTimer;
     private PreferencesWindow? _preferencesWindow;
     private RecordingWindow? _recordingWindow;
+    private HistoryWindow? _historyWindow;
 
     private const int TimeoutSeconds = 45;
     private const uint VK_SHIFT = 0x10;
@@ -91,6 +94,21 @@ public class WhisperVoiceApp : Form
             errors.Add($"Toggle shortcut ({shortcut}): Another app may be using this shortcut. Try a different one in config.");
         }
 
+        // Register history hotkey (Ctrl+H)
+        Logger.Info("Registering history hotkey: Ctrl+H");
+        try
+        {
+            const int MOD_CONTROL = 0x0002;
+            const int VK_H = 0x48;
+            _historyHotkeyId = _globalHotkey.Register(MOD_CONTROL, VK_H);
+            Logger.Info($"History hotkey registered successfully (ID: {_historyHotkeyId})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to register history hotkey (Ctrl+H): {ex.Message}");
+            // Non-critical, don't add to errors
+        }
+
         // Setup push-to-talk keyboard hook
         var pttKey = _config.GetPushToTalkKeyDescription();
         Logger.Info($"Setting up PTT keyboard hook for: {pttKey}");
@@ -140,6 +158,10 @@ public class WhisperVoiceApp : Form
             if (id == _toggleHotkeyId)
             {
                 ToggleRecording();
+            }
+            else if (id == _historyHotkeyId)
+            {
+                ShowHistoryWindow();
             }
         }
 
@@ -320,6 +342,10 @@ public class WhisperVoiceApp : Form
             // Step 3: Paste result
             ClipboardPaste.Paste(text);
             // No notification - text is already pasted at cursor
+
+            // Step 4: Save to history
+            TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
+            Logger.Debug("Transcription saved to history");
         }
         catch (Exception ex)
         {
@@ -355,6 +381,21 @@ public class WhisperVoiceApp : Form
         _preferencesWindow.SettingsSaved += OnSettingsSaved;
         _preferencesWindow.FormClosed += (_, _) => _preferencesWindow = null;
         _preferencesWindow.Show();
+    }
+
+    private void ShowHistoryWindow()
+    {
+        // If already open, bring to front
+        if (_historyWindow != null && !_historyWindow.IsDisposed)
+        {
+            _historyWindow.BringToFront();
+            _historyWindow.Activate();
+            return;
+        }
+
+        _historyWindow = new HistoryWindow();
+        _historyWindow.FormClosed += (_, _) => _historyWindow = null;
+        _historyWindow.Show();
     }
 
     private void OnSettingsSaved(AppConfig newConfig)
