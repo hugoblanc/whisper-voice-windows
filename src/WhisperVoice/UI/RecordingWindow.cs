@@ -77,8 +77,11 @@ public class RecordingWindow : Form
             Text = "● Recording",
             Font = new Font("Segoe UI", 10),
             ForeColor = RecordingColor,
-            AutoSize = true,
-            Location = new Point(Width - 110, 20)
+            AutoSize = false,
+            Size = new Size(120, 25),
+            Location = new Point(Width - 140, 18),
+            TextAlign = ContentAlignment.TopRight,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
 
         // Waveform panel
@@ -86,7 +89,8 @@ public class RecordingWindow : Form
         {
             Location = new Point(20, 85),
             Size = new Size(Width - 40, 50),
-            BackColor = Color.FromArgb(45, 45, 45)
+            BackColor = Color.FromArgb(45, 45, 45),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
         _waveformPanel.Paint += WaveformPanel_Paint;
 
@@ -100,7 +104,8 @@ public class RecordingWindow : Form
             FlatStyle = FlatStyle.Flat,
             Size = new Size(100, 28),
             Location = new Point(Width - 120, 145),
-            Cursor = Cursors.Hand
+            Cursor = Cursors.Hand,
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Right
         };
         _cancelButton.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 70);
         _cancelButton.Click += (_, _) => CancelRequested?.Invoke();
