@@ -32,7 +32,6 @@ public class RecordingWindow : Form
     private static readonly Color TextColor = Color.FromArgb(240, 240, 240);
 
     public event Action? CancelRequested;
-    public event Action<float>? AudioLevelUpdated;
 
     public RecordingWindow()
     {

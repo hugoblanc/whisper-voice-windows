@@ -7,13 +7,13 @@ namespace WhisperVoice.History;
 /// </summary>
 public class HistoryWindow : Form
 {
-    private DataGridView _dataGrid;
-    private TextBox _searchBox;
-    private Button _copyButton;
-    private Button _deleteButton;
-    private Button _clearAllButton;
-    private List<TranscriptionEntry> _allEntries;
-    private List<TranscriptionEntry> _filteredEntries;
+    private DataGridView _dataGrid = null!;
+    private TextBox _searchBox = null!;
+    private Button _copyButton = null!;
+    private Button _deleteButton = null!;
+    private Button _clearAllButton = null!;
+    private List<TranscriptionEntry> _allEntries = null!;
+    private List<TranscriptionEntry> _filteredEntries = null!;
 
     public HistoryWindow()
     {
@@ -190,7 +190,7 @@ public class HistoryWindow : Form
         if (index >= 0 && index < _filteredEntries.Count)
         {
             var entry = _filteredEntries[index];
-            Clipboard.SetText(entry.Text);
+            System.Windows.Forms.Clipboard.SetText(entry.Text);
             MessageBox.Show("Transcription copied to clipboard!", "Copied",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
