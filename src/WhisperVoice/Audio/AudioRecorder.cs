@@ -13,6 +13,7 @@ public class AudioRecorder : IDisposable
     private readonly object _lock = new();
 
     public bool IsRecording => _isRecording;
+    public event Action<float>? AudioLevelChanged;
 
     public static bool IsMicrophoneAvailable()
     {
@@ -94,6 +95,18 @@ public class AudioRecorder : IDisposable
     {
         lock (_lock)
         {
+            // Calculate audio level from buffer (peak detection)
+            float max = 0;
+            for (int i = 0; i < e.BytesRecorded; i += 2)
+            {
+                short sample = BitConverter.ToInt16(e.Buffer, i);
+                float sample32 = Math.Abs(sample / 32768f);
+                if (sample32 > max) max = sample32;
+            }
+
+            // Fire audio level event
+            AudioLevelChanged?.Invoke(max);
+
             _writer?.Write(e.Buffer, 0, e.BytesRecorded);
         }
     }

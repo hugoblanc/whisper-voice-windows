@@ -197,6 +197,9 @@ public class WhisperVoiceApp : Form
 
             // Show recording window
             ShowRecordingWindow();
+
+            // Connect audio level to recording window
+            _recorder.AudioLevelChanged += OnAudioLevelChanged;
         }
         catch (Exception ex)
         {
@@ -222,10 +225,18 @@ public class WhisperVoiceApp : Form
         Logger.Info("Recording cancelled by user");
         if (_state == AppState.Recording)
         {
+            // Disconnect audio level event
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+
             _recorder.StopRecording();
             CloseRecordingWindow();
             SetState(AppState.Idle);
         }
+    }
+
+    private void OnAudioLevelChanged(float level)
+    {
+        _recordingWindow?.UpdateAudioLevel(level);
     }
 
     private void CloseRecordingWindow()
@@ -248,6 +259,10 @@ public class WhisperVoiceApp : Form
         var currentMode = _modeManager.CurrentMode;
 
         Logger.Info("Stopping recording...");
+
+        // Disconnect audio level event
+        _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+
         var audioPath = _recorder.StopRecording();
         SetState(AppState.Transcribing);
         _recordingWindow?.SetState(AppState.Transcribing);

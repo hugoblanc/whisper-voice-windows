@@ -16,7 +16,6 @@ public class RecordingWindow : Form
     private int _waveformIndex;
     private AppState _state = AppState.Recording;
     private string _modeName = "Brut";
-    private readonly Random _random = new();
 
     // UI Controls
     private readonly Label _timerLabel;
@@ -65,10 +64,10 @@ public class RecordingWindow : Form
         _modeLabel = new Label
         {
             Text = "Brut",
-            Font = new Font("Segoe UI", 12),
+            Font = new Font("Segoe UI", 11),
             ForeColor = Color.FromArgb(180, 180, 180),
             AutoSize = true,
-            Location = new Point(22, 55)
+            Location = new Point(22, 60)
         };
 
         // Status indicator
@@ -153,12 +152,7 @@ public class RecordingWindow : Form
 
     private void WaveformTimer_Tick(object? sender, EventArgs e)
     {
-        if (_state == AppState.Recording)
-        {
-            // Simulate audio level with some random variation
-            _waveformData[_waveformIndex] = 0.3f + (float)_random.NextDouble() * 0.7f;
-            _waveformIndex = (_waveformIndex + 1) % _waveformData.Length;
-        }
+        // Repaint waveform (data is updated via UpdateAudioLevel from real microphone)
         _waveformPanel.Invalidate();
     }
 
