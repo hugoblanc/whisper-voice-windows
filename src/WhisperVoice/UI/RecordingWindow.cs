@@ -9,6 +9,8 @@ namespace WhisperVoice.UI;
 /// </summary>
 public class RecordingWindow : Form
 {
+    private const int WS_EX_NOACTIVATE = 0x08000000;
+
     private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly System.Windows.Forms.Timer _waveformTimer;
     private readonly DateTime _startTime;
@@ -33,6 +35,18 @@ public class RecordingWindow : Form
 
     public event Action? CancelRequested;
 
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var createParams = base.CreateParams;
+            createParams.ExStyle |= WS_EX_NOACTIVATE;
+            return createParams;
+        }
+    }
+
     public RecordingWindow()
     {
         _startTime = DateTime.Now;
@@ -41,7 +55,7 @@ public class RecordingWindow : Form
         // Window settings
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(400, 220);
+        Size = new Size(520, 240);
         BackColor = BackgroundColor;
         ShowInTaskbar = false;
         TopMost = true;
@@ -72,7 +86,7 @@ public class RecordingWindow : Form
         // Status indicator
         _statusLabel = new Label
         {
-            Text = "● Recording",
+            Text = "Recording",
             Font = new Font("Segoe UI", 11),
             ForeColor = RecordingColor,
             AutoSize = false,
@@ -86,7 +100,7 @@ public class RecordingWindow : Form
         _waveformPanel = new DoubleBufferedPanel
         {
             Location = new Point(20, 105),
-            Size = new Size(Width - 40, 60),
+            Size = new Size(Width - 40, 70),
             BackColor = Color.FromArgb(45, 45, 45),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -101,7 +115,7 @@ public class RecordingWindow : Form
             BackColor = Color.FromArgb(60, 60, 60),
             FlatStyle = FlatStyle.Flat,
             Size = new Size(110, 32),
-            Location = new Point(Width - 130, 175),
+            Location = new Point(Width - 130, Height - 55),
             Cursor = Cursors.Hand,
             Anchor = AnchorStyles.Bottom | AnchorStyles.Right
         };
@@ -220,9 +234,9 @@ public class RecordingWindow : Form
 
         var (text, color) = state switch
         {
-            AppState.Recording => ("● Recording", RecordingColor),
-            AppState.Transcribing => ("● Processing", ProcessingColor),
-            _ => ("● Done", DoneColor)
+            AppState.Recording => ("Recording", RecordingColor),
+            AppState.Transcribing => ("Processing", ProcessingColor),
+            _ => ("Done", DoneColor)
         };
 
         if (InvokeRequired)

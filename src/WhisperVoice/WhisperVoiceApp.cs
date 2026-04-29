@@ -30,6 +30,7 @@ public class WhisperVoiceApp : Form
     private PreferencesWindow? _preferencesWindow;
     private RecordingWindow? _recordingWindow;
     private HistoryWindow? _historyWindow;
+    private IntPtr _pasteTargetWindow = IntPtr.Zero;
 
     private const int TimeoutSeconds = 45;
     private const uint VK_SHIFT = 0x10;
@@ -182,28 +183,37 @@ public class WhisperVoiceApp : Form
 
     private void OnPttKeyDown()
     {
-        if (_state == AppState.Idle)
+        RunOnUiThread(() =>
         {
-            StartRecording();
-        }
+            if (_state == AppState.Idle)
+            {
+                StartRecording();
+            }
+        });
     }
 
     private void OnPttKeyUp()
     {
-        if (_state == AppState.Recording)
+        RunOnUiThread(() =>
         {
-            StopRecordingAndTranscribe();
-        }
+            if (_state == AppState.Recording)
+            {
+                StopRecordingAndTranscribe();
+            }
+        });
     }
 
     private void OnShiftKeyDown()
     {
-        // Only switch modes while recording
-        if (_state == AppState.Recording)
+        RunOnUiThread(() =>
         {
-            var newMode = _modeManager.NextMode();
-            Logger.Info($"Mode switched to: {newMode.Name}");
-        }
+            // Only switch modes while recording
+            if (_state == AppState.Recording)
+            {
+                var newMode = _modeManager.NextMode();
+                Logger.Info($"Mode switched to: {newMode.Name}");
+            }
+        });
     }
 
     private void StartRecording()
@@ -213,18 +223,22 @@ public class WhisperVoiceApp : Form
         Logger.Info("Starting recording...");
         try
         {
+            _pasteTargetWindow = ClipboardPaste.CaptureTargetWindow();
+            Logger.Debug($"Captured paste target window: 0x{_pasteTargetWindow.ToInt64():X}");
+
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+            _recorder.AudioLevelChanged += OnAudioLevelChanged;
             _recorder.StartRecording();
             SetState(AppState.Recording);
             Logger.Info("Recording started successfully");
 
             // Show recording window
             ShowRecordingWindow();
-
-            // Connect audio level to recording window
-            _recorder.AudioLevelChanged += OnAudioLevelChanged;
         }
         catch (Exception ex)
         {
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+            _pasteTargetWindow = IntPtr.Zero;
             Logger.Error("Failed to start recording", ex);
             _trayIcon.ShowNotification("Recording Error", ex.Message, ToolTipIcon.Error);
         }
@@ -242,7 +256,7 @@ public class WhisperVoiceApp : Form
         _recordingWindow.Show();
     }
 
-    private void OnRecordingCancelled()
+    private async void OnRecordingCancelled()
     {
         Logger.Info("Recording cancelled by user");
         if (_state == AppState.Recording)
@@ -250,9 +264,25 @@ public class WhisperVoiceApp : Form
             // Disconnect audio level event
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
 
-            _recorder.StopRecording();
-            CloseRecordingWindow();
-            SetState(AppState.Idle);
+            SetState(AppState.Transcribing);
+            _recordingWindow?.SetState(AppState.Transcribing);
+
+            string? audioPath = null;
+            try
+            {
+                audioPath = await Task.Run(() => _recorder.StopRecording());
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to cancel recording cleanly", ex);
+            }
+            finally
+            {
+                AudioRecorder.CleanupTempFile(audioPath);
+                CloseRecordingWindow();
+                _pasteTargetWindow = IntPtr.Zero;
+                SetState(AppState.Idle);
+            }
         }
     }
 
@@ -279,22 +309,25 @@ public class WhisperVoiceApp : Form
 
         // Capture current mode before stopping (it might change)
         var currentMode = _modeManager.CurrentMode;
+        var pasteTargetWindow = _pasteTargetWindow;
+        string? audioPath = null;
 
         Logger.Info("Stopping recording...");
 
         // Disconnect audio level event
         _recorder.AudioLevelChanged -= OnAudioLevelChanged;
 
-        var audioPath = _recorder.StopRecording();
         SetState(AppState.Transcribing);
         _recordingWindow?.SetState(AppState.Transcribing);
-        Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
 
         // Start timeout timer
         StartTimeoutTimer();
 
         try
         {
+            audioPath = await Task.Run(() => _recorder.StopRecording());
+            Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
+
             if (string.IsNullOrEmpty(audioPath))
             {
                 throw new InvalidOperationException("No audio recorded");
@@ -340,8 +373,14 @@ public class WhisperVoiceApp : Form
             }
 
             // Step 3: Paste result
-            ClipboardPaste.Paste(text);
-            // No notification - text is already pasted at cursor
+            CloseRecordingWindow();
+            await Task.Delay(75);
+
+            var pasted = ClipboardPaste.Paste(text, pasteTargetWindow);
+            if (!pasted)
+            {
+                _trayIcon.ShowNotification("Paste Warning", "Transcription copied to clipboard, but automatic paste may have failed.", ToolTipIcon.Warning);
+            }
 
             // Step 4: Save to history
             TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
@@ -357,8 +396,23 @@ public class WhisperVoiceApp : Form
             StopTimeoutTimer();
             AudioRecorder.CleanupTempFile(audioPath);
             CloseRecordingWindow();
+            _pasteTargetWindow = IntPtr.Zero;
             SetState(AppState.Idle);
         }
+    }
+
+    private void RunOnUiThread(Action action)
+    {
+        if (IsDisposed) return;
+
+        if (InvokeRequired)
+        {
+            if (!IsHandleCreated) return;
+            BeginInvoke(action);
+            return;
+        }
+
+        action();
     }
 
     private void SetState(AppState state)

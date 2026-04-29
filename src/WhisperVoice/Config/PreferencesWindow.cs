@@ -44,9 +44,10 @@ public class PreferencesWindow : Form
     private void InitializeComponents()
     {
         Text = "Whisper Voice - Preferences";
-        Size = new Size(500, 480);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        ClientSize = new Size(620, 520);
+        MinimumSize = new Size(520, 420);
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9F);
@@ -54,7 +55,8 @@ public class PreferencesWindow : Form
         _tabControl = new TabControl
         {
             Location = new Point(10, 10),
-            Size = new Size(465, 380)
+            Size = new Size(ClientSize.Width - 20, ClientSize.Height - 65),
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
         };
 
         // Create tabs
@@ -70,8 +72,9 @@ public class PreferencesWindow : Form
         _saveButton = new Button
         {
             Text = "Save",
-            Location = new Point(295, 400),
+            Location = new Point(ClientSize.Width - 200, ClientSize.Height - 42),
             Size = new Size(85, 30),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
             BackColor = Color.FromArgb(0, 120, 212),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat
@@ -82,8 +85,9 @@ public class PreferencesWindow : Form
         _cancelButton = new Button
         {
             Text = "Cancel",
-            Location = new Point(390, 400),
+            Location = new Point(ClientSize.Width - 105, ClientSize.Height - 42),
             Size = new Size(85, 30),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
             FlatStyle = FlatStyle.Flat
         };
         _cancelButton.Click += (_, _) => Close();
@@ -96,6 +100,7 @@ public class PreferencesWindow : Form
     private TabPage CreateGeneralTab()
     {
         var tab = new TabPage("General");
+        tab.Padding = new Padding(12);
 
         // Provider selection
         var providerLabel = new Label
@@ -130,6 +135,7 @@ public class PreferencesWindow : Form
         {
             Location = new Point(15, 100),
             Size = new Size(420, 25),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             UseSystemPasswordChar = true,
             PlaceholderText = "sk-..."
         };
@@ -139,7 +145,8 @@ public class PreferencesWindow : Form
         {
             Text = "Get your API key from platform.openai.com",
             Location = new Point(15, 128),
-            AutoSize = true
+            AutoSize = true,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
         _apiKeyLink.Click += ApiKeyLink_Click;
 
@@ -158,7 +165,8 @@ public class PreferencesWindow : Form
             Text = "",
             Location = new Point(145, 172),
             Size = new Size(290, 20),
-            AutoSize = false
+            AutoSize = false,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
         tab.Controls.AddRange(new Control[]
@@ -174,6 +182,7 @@ public class PreferencesWindow : Form
     private TabPage CreateShortcutsTab()
     {
         var tab = new TabPage("Shortcuts");
+        tab.Padding = new Padding(12);
 
         // Toggle shortcut
         var shortcutLabel = new Label
@@ -238,6 +247,7 @@ public class PreferencesWindow : Form
     private TabPage CreateLogsTab()
     {
         var tab = new TabPage("Logs");
+        tab.Padding = new Padding(12);
 
         _autoScrollCheckBox = new CheckBox
         {
@@ -251,6 +261,7 @@ public class PreferencesWindow : Form
         {
             Location = new Point(15, 40),
             Size = new Size(420, 250),
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
             Multiline = true,
             ReadOnly = true,
             ScrollBars = ScrollBars.Both,
@@ -263,6 +274,7 @@ public class PreferencesWindow : Form
             Text = "Clear Logs",
             Location = new Point(15, 300),
             Size = new Size(90, 28),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             FlatStyle = FlatStyle.Flat
         };
         clearLogsButton.Click += ClearLogsButton_Click;
@@ -272,6 +284,7 @@ public class PreferencesWindow : Form
             Text = "Open Log Folder",
             Location = new Point(115, 300),
             Size = new Size(110, 28),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             FlatStyle = FlatStyle.Flat
         };
         openLogFolderButton.Click += (_, _) => Logger.OpenLogFolder();
@@ -349,7 +362,7 @@ public class PreferencesWindow : Form
                 _apiKeyLink.Enabled = false;
                 _apiKeyTextBox.Enabled = false;
                 _apiKeyTextBox.PlaceholderText = "Not required for local mode";
-                _testButton.Text = "Check Model";
+                _testConnectionButton.Text = "Check Model";
             }
             else
             {
@@ -359,7 +372,7 @@ public class PreferencesWindow : Form
                 _apiKeyLink.Enabled = true;
                 _apiKeyTextBox.Enabled = true;
                 _apiKeyTextBox.PlaceholderText = item.Info.Id == "openai" ? "sk-..." : "Enter API key";
-                _testButton.Text = "Test Connection";
+                _testConnectionButton.Text = "Test Connection";
             }
         }
     }

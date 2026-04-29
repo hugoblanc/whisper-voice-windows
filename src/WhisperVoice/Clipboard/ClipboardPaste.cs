@@ -5,20 +5,17 @@ namespace WhisperVoice.Clipboard;
 
 public static class ClipboardPaste
 {
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr WindowFromPoint(POINT point);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -28,13 +25,6 @@ public static class ClipboardPaste
 
     [DllImport("user32.dll")]
     private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int X;
-        public int Y;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
@@ -71,31 +61,35 @@ public static class ClipboardPaste
         public IntPtr dwExtraInfo;
     }
 
-    private const uint INPUT_MOUSE = 0;
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
-    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_V = 0x56;
 
-    public static void Paste(string text)
+    public static IntPtr CaptureTargetWindow()
+    {
+        return GetForegroundWindow();
+    }
+
+    public static bool Paste(string text, IntPtr targetWindow = default)
     {
         if (string.IsNullOrEmpty(text))
         {
             Logger.Warn("ClipboardPaste called with empty text");
-            return;
+            return false;
         }
 
         Logger.Debug($"Starting paste operation ({text.Length} chars)");
 
-        // Get window under mouse cursor and activate it
-        GetCursorPos(out var cursorPos);
-        var targetWindow = WindowFromPoint(cursorPos);
+        if (targetWindow == IntPtr.Zero || !IsWindow(targetWindow))
+        {
+            targetWindow = GetForegroundWindow();
+            Logger.Debug("Paste target was unavailable; using current foreground window");
+        }
 
         if (targetWindow != IntPtr.Zero)
         {
-            Logger.Debug($"Target window found at cursor position ({cursorPos.X}, {cursorPos.Y})");
+            Logger.Debug($"Restoring paste target window: 0x{targetWindow.ToInt64():X}");
 
             // Attach to target window's thread to allow SetForegroundWindow
             var targetThread = GetWindowThreadProcessId(targetWindow, out _);
@@ -109,25 +103,9 @@ public static class ClipboardPaste
             }
 
             // Activate window
-            SetForegroundWindow(targetWindow);
-            Thread.Sleep(100); // Increased from 50ms
-
-            // Click at cursor position to place the text caret there
-            SendInput(2, new INPUT[]
-            {
-                new INPUT
-                {
-                    type = INPUT_MOUSE,
-                    U = new InputUnion { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } }
-                },
-                new INPUT
-                {
-                    type = INPUT_MOUSE,
-                    U = new InputUnion { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } }
-                }
-            }, Marshal.SizeOf<INPUT>());
-
-            Thread.Sleep(100); // Increased from 50ms
+            var foregroundChanged = SetForegroundWindow(targetWindow);
+            Logger.Debug($"SetForegroundWindow result: {foregroundChanged}");
+            Thread.Sleep(120);
 
             if (attached)
             {
@@ -136,7 +114,7 @@ public static class ClipboardPaste
         }
         else
         {
-            Logger.Warn("No target window found under cursor");
+            Logger.Warn("No target window available for paste");
         }
 
         // Copy text to clipboard (must be on STA thread)
@@ -159,7 +137,7 @@ public static class ClipboardPaste
         catch (Exception ex)
         {
             Logger.Error("Failed to copy text to clipboard", ex);
-            return;
+            return false;
         }
 
         // Longer delay to ensure clipboard is ready
@@ -191,8 +169,20 @@ public static class ClipboardPaste
             }
         };
 
-        var result = SendInput((uint)kbInputs.Length, kbInputs, Marshal.SizeOf<INPUT>());
-        Logger.Debug($"SendInput result: {result} events sent");
-        Logger.Info("Paste operation completed");
+        var inputSize = Marshal.SizeOf<INPUT>();
+        var result = SendInput((uint)kbInputs.Length, kbInputs, inputSize);
+        var lastError = result == 0 ? Marshal.GetLastWin32Error() : 0;
+        Logger.Debug($"SendInput result: {result} events sent (INPUT size: {inputSize}, last error: {lastError})");
+        var success = result == (uint)kbInputs.Length;
+        if (success)
+        {
+            Logger.Info("Paste operation completed");
+        }
+        else
+        {
+            Logger.Warn($"Paste operation may be incomplete: {result}/{kbInputs.Length} input events sent");
+        }
+
+        return success;
     }
 }

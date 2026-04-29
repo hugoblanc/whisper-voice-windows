@@ -12,7 +12,13 @@ public class AudioRecorder : IDisposable
     private readonly ManualResetEvent _recordingStoppedEvent = new(true);
     private readonly object _lock = new();
 
-    public bool IsRecording => _isRecording;
+    public bool IsRecording
+    {
+        get
+        {
+            lock (_lock) return _isRecording;
+        }
+    }
     public event Action<float>? AudioLevelChanged;
 
     public static bool IsMicrophoneAvailable()
@@ -73,11 +79,13 @@ public class AudioRecorder : IDisposable
 
             var tempDir = Path.Combine(Path.GetTempPath(), "WhisperVoice");
             Directory.CreateDirectory(tempDir);
-            _tempFilePath = Path.Combine(tempDir, $"recording_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
+            _tempFilePath = Path.Combine(tempDir, $"recording_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}.wav");
 
             _waveIn = new WaveInEvent
             {
-                WaveFormat = new WaveFormat(16000, 16, 1) // 16kHz, 16-bit, mono
+                WaveFormat = new WaveFormat(16000, 16, 1), // 16kHz, 16-bit, mono
+                BufferMilliseconds = 50,
+                NumberOfBuffers = 3
             };
 
             _writer = new WaveFileWriter(_tempFilePath, _waveIn.WaveFormat);
@@ -86,52 +94,102 @@ public class AudioRecorder : IDisposable
             _waveIn.DataAvailable += OnDataAvailable;
             _waveIn.RecordingStopped += OnRecordingStopped;
 
-            _waveIn.StartRecording();
-            _isRecording = true;
+            try
+            {
+                _waveIn.StartRecording();
+                _isRecording = true;
+            }
+            catch
+            {
+                _writer?.Dispose();
+                _writer = null;
+                _waveIn?.Dispose();
+                _waveIn = null;
+                _recordingStoppedEvent.Set();
+                throw;
+            }
         }
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
-        lock (_lock)
+        try
         {
             // Calculate audio level from buffer (peak detection)
             float max = 0;
-            for (int i = 0; i < e.BytesRecorded; i += 2)
+            for (int i = 0; i + 1 < e.BytesRecorded; i += 2)
             {
                 short sample = BitConverter.ToInt16(e.Buffer, i);
                 float sample32 = Math.Abs(sample / 32768f);
                 if (sample32 > max) max = sample32;
             }
 
-            // Fire audio level event
-            AudioLevelChanged?.Invoke(max);
+            lock (_lock)
+            {
+                _writer?.Write(e.Buffer, 0, e.BytesRecorded);
+            }
 
-            _writer?.Write(e.Buffer, 0, e.BytesRecorded);
+            try
+            {
+                AudioLevelChanged?.Invoke(max);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Audio level update failed: {ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to write audio data", ex);
         }
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
     {
-        lock (_lock)
+        if (e.Exception != null)
         {
-            _writer?.Dispose();
-            _writer = null;
-            _waveIn?.Dispose();
-            _waveIn = null;
+            Logger.Error("Audio recording stopped with an error", e.Exception);
         }
-        _recordingStoppedEvent.Set();
+
+        try
+        {
+            lock (_lock)
+            {
+                _writer?.Dispose();
+                _writer = null;
+            }
+        }
+        finally
+        {
+            _recordingStoppedEvent.Set();
+        }
     }
 
     public string? StopRecording()
     {
-        if (!_isRecording) return null;
+        WaveInEvent? waveInToStop;
+        string? tempFilePath;
 
-        _isRecording = false;
-        _waveIn?.StopRecording();
+        lock (_lock)
+        {
+            if (!_isRecording) return null;
 
-        // Wait for file to be fully written (max 5 seconds)
-        if (!_recordingStoppedEvent.WaitOne(5000))
+            _isRecording = false;
+            waveInToStop = _waveIn;
+            tempFilePath = _tempFilePath;
+        }
+
+        try
+        {
+            waveInToStop?.StopRecording();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to stop audio recording cleanly", ex);
+        }
+
+        // Wait for file to be fully written.
+        if (!_recordingStoppedEvent.WaitOne(2000))
         {
             // Timeout: force cleanup so the file is released
             Logger.Warn("Recording stop timed out, forcing cleanup");
@@ -142,9 +200,18 @@ public class AudioRecorder : IDisposable
                 _waveIn?.Dispose();
                 _waveIn = null;
             }
+            _recordingStoppedEvent.Set();
+        }
+        else
+        {
+            lock (_lock)
+            {
+                _waveIn?.Dispose();
+                _waveIn = null;
+            }
         }
 
-        return _tempFilePath;
+        return tempFilePath;
     }
 
     public static void CleanupTempFile(string? filePath)
@@ -183,8 +250,23 @@ public class AudioRecorder : IDisposable
 
     public void Dispose()
     {
-        _waveIn?.StopRecording();
-        _writer?.Dispose();
-        _waveIn?.Dispose();
+        try
+        {
+            StopRecording();
+        }
+        catch
+        {
+            // Ignore disposal errors
+        }
+
+        lock (_lock)
+        {
+            _writer?.Dispose();
+            _writer = null;
+            _waveIn?.Dispose();
+            _waveIn = null;
+        }
+
+        _recordingStoppedEvent.Dispose();
     }
 }
