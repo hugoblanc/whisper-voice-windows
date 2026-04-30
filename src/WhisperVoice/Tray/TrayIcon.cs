@@ -59,7 +59,7 @@ public class TrayIcon : IDisposable
 
         // AI Mode indicator
         var modeText = hasAIModes
-            ? $"Mode: {_currentMode} (Shift to switch)"
+            ? $"Mode: {_currentMode} (Tab to switch)"
             : $"Mode: {_currentMode} (add OpenAI key for AI modes)";
         _modeMenuItem = new ToolStripMenuItem(modeText) { Enabled = false };
         contextMenu.Items.Add(_modeMenuItem);
@@ -87,7 +87,7 @@ public class TrayIcon : IDisposable
     public void UpdateModeLabel(string modeName)
     {
         _currentMode = modeName;
-        _modeMenuItem.Text = $"Mode: {modeName} (Shift to switch)";
+        _modeMenuItem.Text = $"Mode: {modeName} (Tab to switch)";
     }
 
     public void SetState(AppState state)

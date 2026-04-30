@@ -4,89 +4,127 @@ using WhisperVoice.Logging;
 namespace WhisperVoice.Processing;
 
 /// <summary>
-/// Manages AI processing mode selection and availability
+/// Manages AI processing mode selection and availability.
+/// The available list is built from built-in modes plus enabled custom modes.
 /// </summary>
 public class ModeManager
 {
+    private readonly Func<AppConfig> _configProvider;
+    private readonly List<AIMode> _modes = new();
     private int _currentModeIndex;
-    private readonly Func<bool> _hasOpenAIKey;
 
     public event Action<AIMode>? ModeChanged;
 
-    public AIMode CurrentMode => AIMode.All[_currentModeIndex];
+    public IReadOnlyList<AIMode> Modes => _modes;
+    public AIMode CurrentMode => _modes.Count > 0 ? _modes[_currentModeIndex] : AIMode.Brut;
+    public bool HasAIModesAvailable => _configProvider().HasOpenAIKeyForProcessing;
 
-    /// <summary>
-    /// Check if AI modes are available (requires OpenAI API key)
-    /// </summary>
-    public bool HasAIModesAvailable => _hasOpenAIKey();
-
-    public ModeManager(Func<bool> hasOpenAIKeyFunc)
+    public ModeManager(Func<AppConfig> configProvider)
     {
-        _hasOpenAIKey = hasOpenAIKeyFunc;
-        _currentModeIndex = 0;
+        _configProvider = configProvider;
+        ReloadModes(raiseChanged: false);
     }
 
     /// <summary>
-    /// Check if a specific mode is available
+    /// Reload modes from config while preserving the selected mode when possible.
+    /// </summary>
+    public void ReloadModes(bool raiseChanged = true)
+    {
+        var previousModeId = CurrentMode.Id;
+        var config = _configProvider();
+        var disabledBuiltIns = new HashSet<string>(
+            config.DisabledBuiltInModeIds ?? new List<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        var nextModes = new List<AIMode>();
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mode in AIMode.BuiltInModes)
+        {
+            if (disabledBuiltIns.Contains(mode.Id)) continue;
+            nextModes.Add(mode);
+            ids.Add(mode.Id);
+        }
+
+        foreach (var customMode in config.CustomModes.Where(mode => mode.Enabled && mode.IsValid))
+        {
+            customMode.EnsureId(ids);
+            if (!ids.Add(customMode.Id))
+            {
+                Logger.Warn($"[ModeManager] Skipping duplicate custom mode id: {customMode.Id}");
+                continue;
+            }
+
+            nextModes.Add(AIMode.FromCustom(customMode));
+        }
+
+        if (nextModes.Count == 0)
+        {
+            nextModes.Add(AIMode.Brut);
+        }
+
+        _modes.Clear();
+        _modes.AddRange(nextModes);
+
+        var previousIndex = _modes.FindIndex(mode =>
+            string.Equals(mode.Id, previousModeId, StringComparison.OrdinalIgnoreCase));
+        _currentModeIndex = previousIndex >= 0 ? previousIndex : 0;
+
+        Logger.Info($"[ModeManager] Loaded {_modes.Count} modes ({_modes.Count(mode => mode.IsCustom)} custom)");
+
+        if (raiseChanged)
+        {
+            ModeChanged?.Invoke(CurrentMode);
+        }
+    }
+
+    /// <summary>
+    /// Check if a specific mode is available.
     /// </summary>
     public bool IsModeAvailable(AIMode mode)
     {
-        // Brut mode is always available
         if (!mode.RequiresProcessing) return true;
-
-        // AI modes require OpenAI key
-        return _hasOpenAIKey();
+        return HasAIModesAvailable;
     }
 
     /// <summary>
-    /// Switch to the next available mode (cycles through)
+    /// Switch to the next available mode.
     /// </summary>
-    /// <returns>The new current mode</returns>
     public AIMode NextMode()
     {
-        var modes = AIMode.All;
-        var startIndex = _currentModeIndex;
-        var nextIndex = (_currentModeIndex + 1) % modes.Length;
+        if (_modes.Count == 0)
+        {
+            ReloadModes();
+        }
+
+        var nextIndex = (_currentModeIndex + 1) % _modes.Count;
         var attempts = 0;
 
-        // Find next available mode
-        while (!IsModeAvailable(modes[nextIndex]) && attempts < modes.Length)
+        while (!IsModeAvailable(_modes[nextIndex]) && attempts < _modes.Count)
         {
-            nextIndex = (nextIndex + 1) % modes.Length;
+            nextIndex = (nextIndex + 1) % _modes.Count;
             attempts++;
         }
 
-        // If no available mode found, stay on Brut
-        if (attempts >= modes.Length)
-        {
-            _currentModeIndex = 0;
-        }
-        else
-        {
-            _currentModeIndex = nextIndex;
-        }
+        _currentModeIndex = attempts >= _modes.Count ? 0 : nextIndex;
 
         Logger.Info($"[ModeManager] Switched to mode: {CurrentMode.Name}");
         ModeChanged?.Invoke(CurrentMode);
         return CurrentMode;
     }
 
-    /// <summary>
-    /// Set mode by ID
-    /// </summary>
     public void SetMode(string modeId)
     {
-        var mode = AIMode.GetById(modeId);
-        if (mode == null || !IsModeAvailable(mode)) return;
+        var index = _modes.FindIndex(mode =>
+            string.Equals(mode.Id, modeId, StringComparison.OrdinalIgnoreCase));
 
-        _currentModeIndex = AIMode.IndexOf(mode);
+        if (index < 0 || !IsModeAvailable(_modes[index])) return;
+
+        _currentModeIndex = index;
         Logger.Info($"[ModeManager] Set mode to: {CurrentMode.Name}");
         ModeChanged?.Invoke(CurrentMode);
     }
 
-    /// <summary>
-    /// Reset to default mode (Brut)
-    /// </summary>
     public void Reset()
     {
         _currentModeIndex = 0;

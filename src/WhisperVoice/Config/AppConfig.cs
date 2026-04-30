@@ -10,6 +10,8 @@ public class AppConfig
     public uint ShortcutModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT (Ctrl+Shift)
     public uint ShortcutKeyCode { get; set; } = 0x20;     // VK_SPACE
     public uint PushToTalkKeyCode { get; set; } = 0x72;   // VK_F3
+    public List<CustomModeConfig> CustomModes { get; set; } = new();
+    public List<string> DisabledBuiltInModeIds { get; set; } = new();
 
     /// <summary>
     /// Get the API key for the specified provider, falling back to main ApiKey for backward compatibility
@@ -75,7 +77,9 @@ public class AppConfig
                 return null;
 
             var json = File.ReadAllText(ConfigPath);
-            return JsonSerializer.Deserialize<AppConfig>(json, JsonOptions);
+            var config = JsonSerializer.Deserialize<AppConfig>(json, JsonOptions);
+            config?.EnsureDefaults();
+            return config;
         }
         catch
         {
@@ -85,9 +89,24 @@ public class AppConfig
 
     public void Save()
     {
+        EnsureDefaults();
         Directory.CreateDirectory(ConfigDirectory);
         var json = JsonSerializer.Serialize(this, JsonOptions);
         File.WriteAllText(ConfigPath, json);
+    }
+
+    private void EnsureDefaults()
+    {
+        ProviderApiKeys ??= new Dictionary<string, string>();
+        CustomModes ??= new List<CustomModeConfig>();
+        DisabledBuiltInModeIds ??= new List<string>();
+
+        var existingIds = new HashSet<string>(DisabledBuiltInModeIds, StringComparer.OrdinalIgnoreCase);
+        foreach (var mode in CustomModes.Where(m => m.IsValid))
+        {
+            mode.EnsureId(existingIds);
+            existingIds.Add(mode.Id);
+        }
     }
 
     public string GetToggleShortcutDescription()

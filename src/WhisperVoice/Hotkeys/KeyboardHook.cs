@@ -22,6 +22,9 @@ public class KeyboardHook : IDisposable
     private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
     private const int WM_SYSKEYUP = 0x0105;
+    private const uint VK_SHIFT = 0x10;
+    private const uint VK_LSHIFT = 0xA0;
+    private const uint VK_RSHIFT = 0xA1;
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -34,6 +37,7 @@ public class KeyboardHook : IDisposable
 
     public event Action? KeyDown;
     public event Action? KeyUp;
+    public Func<bool>? ShouldSuppressKey { get; set; }
 
     public KeyboardHook()
     {
@@ -77,7 +81,8 @@ public class KeyboardHook : IDisposable
         {
             var vkCode = (uint)Marshal.ReadInt32(lParam);
 
-            if (vkCode == _watchedKeyCode)
+            var matchesWatchedKey = MatchesWatchedKey(vkCode);
+            if (matchesWatchedKey)
             {
                 var msg = (int)wParam;
 
@@ -91,10 +96,23 @@ public class KeyboardHook : IDisposable
                     _keyIsDown = false;
                     KeyUp?.Invoke();
                 }
+
+                if (ShouldSuppressKey?.Invoke() == true)
+                {
+                    return new IntPtr(1);
+                }
             }
         }
 
         return CallNextHookEx(_hookId, nCode, wParam, lParam);
+    }
+
+    private bool MatchesWatchedKey(uint vkCode)
+    {
+        if (vkCode == _watchedKeyCode) return true;
+
+        return _watchedKeyCode == VK_SHIFT &&
+               (vkCode == VK_LSHIFT || vkCode == VK_RSHIFT);
     }
 
     public void Dispose()

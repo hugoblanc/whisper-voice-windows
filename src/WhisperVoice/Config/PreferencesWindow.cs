@@ -1,5 +1,6 @@
 using WhisperVoice.Api;
 using WhisperVoice.Logging;
+using WhisperVoice.Processing;
 
 namespace WhisperVoice.Config;
 
@@ -18,6 +19,13 @@ public class PreferencesWindow : Form
     private ComboBox _shortcutCombo = null!;
     private ComboBox _pttCombo = null!;
 
+    // Modes tab
+    private ListBox _builtInModesList = null!;
+    private ListBox _customModesList = null!;
+    private Button _editModeButton = null!;
+    private Button _deleteModeButton = null!;
+    private readonly List<CustomModeConfig> _customModes = new();
+
     // Logs tab
     private TextBox _logTextBox = null!;
     private CheckBox _autoScrollCheckBox = null!;
@@ -26,6 +34,7 @@ public class PreferencesWindow : Form
     // Footer
     private Button _saveButton = null!;
     private Button _cancelButton = null!;
+    private FlowLayoutPanel _footerPanel = null!;
 
     private readonly AppConfig _originalConfig;
     private bool _connectionTested;
@@ -44,8 +53,8 @@ public class PreferencesWindow : Form
     private void InitializeComponents()
     {
         Text = "Whisper Voice - Preferences";
-        ClientSize = new Size(620, 520);
-        MinimumSize = new Size(520, 420);
+        ClientSize = new Size(760, 640);
+        MinimumSize = new Size(640, 540);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimizeBox = false;
@@ -55,26 +64,34 @@ public class PreferencesWindow : Form
         _tabControl = new TabControl
         {
             Location = new Point(10, 10),
-            Size = new Size(ClientSize.Width - 20, ClientSize.Height - 65),
+            Size = new Size(ClientSize.Width - 20, ClientSize.Height - 72),
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
         };
 
         // Create tabs
         var generalTab = CreateGeneralTab();
         var shortcutsTab = CreateShortcutsTab();
+        var modesTab = CreateModesTab();
         var logsTab = CreateLogsTab();
 
         _tabControl.TabPages.Add(generalTab);
         _tabControl.TabPages.Add(shortcutsTab);
+        _tabControl.TabPages.Add(modesTab);
         _tabControl.TabPages.Add(logsTab);
 
-        // Footer buttons
+        _footerPanel = new FlowLayoutPanel
+        {
+            Height = 46,
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(0, 8, 10, 8)
+        };
+
         _saveButton = new Button
         {
             Text = "Save",
-            Location = new Point(ClientSize.Width - 200, ClientSize.Height - 42),
-            Size = new Size(85, 30),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+            Size = new Size(104, 32),
             BackColor = Color.FromArgb(0, 120, 212),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat
@@ -85,16 +102,17 @@ public class PreferencesWindow : Form
         _cancelButton = new Button
         {
             Text = "Cancel",
-            Location = new Point(ClientSize.Width - 105, ClientSize.Height - 42),
-            Size = new Size(85, 30),
-            Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+            Size = new Size(104, 32),
+            Margin = new Padding(8, 0, 0, 0),
             FlatStyle = FlatStyle.Flat
         };
         _cancelButton.Click += (_, _) => Close();
 
+        _footerPanel.Controls.Add(_cancelButton);
+        _footerPanel.Controls.Add(_saveButton);
+
         Controls.Add(_tabControl);
-        Controls.Add(_saveButton);
-        Controls.Add(_cancelButton);
+        Controls.Add(_footerPanel);
     }
 
     private TabPage CreateGeneralTab()
@@ -244,6 +262,120 @@ public class PreferencesWindow : Form
         return tab;
     }
 
+    private TabPage CreateModesTab()
+    {
+        var tab = new TabPage("Modes");
+        tab.Padding = new Padding(12);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(4)
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+
+        var builtInLabel = new Label
+        {
+            Text = "Built-in modes",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 6)
+        };
+
+        _builtInModesList = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            IntegralHeight = false,
+            HorizontalScrollbar = true,
+            Margin = new Padding(0, 0, 0, 6)
+        };
+        foreach (var mode in AIMode.BuiltInModes)
+        {
+            _builtInModesList.Items.Add(new BuiltInModeListItem(mode));
+        }
+
+        var customLabel = new Label
+        {
+            Text = "Custom modes",
+            AutoSize = true,
+            Margin = new Padding(0, 12, 0, 6)
+        };
+
+        _customModesList = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            IntegralHeight = false,
+            HorizontalScrollbar = true,
+            Margin = new Padding(0, 0, 0, 6)
+        };
+        _customModesList.SelectedIndexChanged += (_, _) => UpdateModeButtons();
+        _customModesList.DoubleClick += (_, _) => EditSelectedMode();
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 8, 0, 4),
+            Margin = Padding.Empty
+        };
+
+        var addModeButton = new Button
+        {
+            Text = "Add...",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat
+        };
+        addModeButton.Click += AddModeButton_Click;
+
+        _editModeButton = new Button
+        {
+            Text = "Edit...",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _editModeButton.Click += (_, _) => EditSelectedMode();
+
+        _deleteModeButton = new Button
+        {
+            Text = "Delete",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _deleteModeButton.Click += DeleteModeButton_Click;
+
+        buttonPanel.Controls.AddRange(new Control[] { addModeButton, _editModeButton, _deleteModeButton });
+
+        var hintLabel = new Label
+        {
+            Text = "Tab cycles through enabled modes while recording.",
+            ForeColor = Color.Gray,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = Padding.Empty
+        };
+
+        root.Controls.Add(builtInLabel, 0, 0);
+        root.Controls.Add(_builtInModesList, 0, 1);
+        root.Controls.Add(customLabel, 0, 2);
+        root.Controls.Add(_customModesList, 0, 3);
+        root.Controls.Add(buttonPanel, 0, 4);
+        root.Controls.Add(hintLabel, 0, 5);
+
+        tab.Controls.Add(root);
+        return tab;
+    }
+
     private TabPage CreateLogsTab()
     {
         var tab = new TabPage("Logs");
@@ -300,6 +432,100 @@ public class PreferencesWindow : Form
         return tab;
     }
 
+    private void AddModeButton_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new CustomModeEditorDialog(null, GetExistingModeIds());
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _customModes.Add(dialog.Mode);
+        RefreshCustomModesList();
+        _customModesList.SelectedIndex = _customModes.Count - 1;
+    }
+
+    private void EditSelectedMode()
+    {
+        if (_customModesList.SelectedItem is not CustomModeListItem item) return;
+
+        var existingIds = GetExistingModeIds()
+            .Where(id => !string.Equals(id, item.Mode.Id, StringComparison.OrdinalIgnoreCase));
+
+        using var dialog = new CustomModeEditorDialog(item.Mode, existingIds);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _customModes[item.Index] = dialog.Mode;
+        RefreshCustomModesList();
+        _customModesList.SelectedIndex = item.Index;
+    }
+
+    private void DeleteModeButton_Click(object? sender, EventArgs e)
+    {
+        if (_customModesList.SelectedItem is not CustomModeListItem item) return;
+
+        var result = MessageBox.Show(
+            $"Delete custom mode '{item.Mode.Name}'?",
+            "Delete Custom Mode",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (result != DialogResult.Yes) return;
+
+        _customModes.RemoveAt(item.Index);
+        RefreshCustomModesList();
+    }
+
+    private void RefreshCustomModesList()
+    {
+        var previousIndex = _customModesList.SelectedIndex;
+        _customModesList.Items.Clear();
+
+        for (var i = 0; i < _customModes.Count; i++)
+        {
+            _customModesList.Items.Add(new CustomModeListItem(i, _customModes[i]));
+        }
+
+        if (_customModesList.Items.Count > 0)
+        {
+            _customModesList.SelectedIndex = Math.Clamp(previousIndex, 0, _customModesList.Items.Count - 1);
+        }
+
+        UpdateModeButtons();
+    }
+
+    private void UpdateModeButtons()
+    {
+        var hasSelection = _customModesList.SelectedItem is CustomModeListItem;
+        _editModeButton.Enabled = hasSelection;
+        _deleteModeButton.Enabled = hasSelection;
+    }
+
+    private IEnumerable<string> GetExistingModeIds() =>
+        AIMode.BuiltInModes
+            .Select(mode => mode.Id)
+            .Concat(_customModes.Select(mode => mode.Id))
+            .Where(id => !string.IsNullOrWhiteSpace(id));
+
+    private List<CustomModeConfig> BuildCustomModesForSave()
+    {
+        var modes = new List<CustomModeConfig>();
+        var ids = new HashSet<string>(
+            AIMode.BuiltInModes.Select(mode => mode.Id),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mode in _customModes.Where(mode => mode.IsValid))
+        {
+            var clone = mode.Clone();
+            if (string.IsNullOrWhiteSpace(clone.Id) || ids.Contains(clone.Id))
+            {
+                clone.Id = CustomModeConfig.CreateUniqueId(clone.Name, ids);
+            }
+
+            ids.Add(clone.Id);
+            modes.Add(clone);
+        }
+
+        return modes;
+    }
+
     private void LoadCurrentSettings()
     {
         // Select current provider
@@ -336,6 +562,12 @@ public class PreferencesWindow : Form
         {
             _pttCombo.SelectedIndex = 2; // F3 default
         }
+
+        // Load custom modes
+        _customModes.Clear();
+        _customModes.AddRange((_originalConfig.CustomModes ?? new List<CustomModeConfig>())
+            .Select(mode => mode.Clone()));
+        RefreshCustomModesList();
 
         // Update UI for selected provider
         UpdateProviderUI();
@@ -464,7 +696,7 @@ public class PreferencesWindow : Form
         _logRefreshTimer.Tick += (_, _) =>
         {
             // Only refresh if Logs tab is active
-            if (_tabControl.SelectedIndex == 2)
+            if (_tabControl.SelectedTab?.Text == "Logs")
             {
                 RefreshLogs();
             }
@@ -539,13 +771,25 @@ public class PreferencesWindow : Form
         // Parse PTT key code (F1=0x70, F2=0x71, etc.)
         uint pttKeyCode = (uint)(0x70 + _pttCombo.SelectedIndex);
 
+        var providerApiKeys = new Dictionary<string, string>(
+            _originalConfig.ProviderApiKeys ?? new Dictionary<string, string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            providerApiKeys[selectedProvider.Id] = apiKey;
+        }
+
         var newConfig = new AppConfig
         {
             Provider = selectedProvider.Id,
             ApiKey = apiKey,
+            ProviderApiKeys = providerApiKeys,
             ShortcutModifiers = shortcutModifiers,
             ShortcutKeyCode = 0x20, // VK_SPACE
-            PushToTalkKeyCode = pttKeyCode
+            PushToTalkKeyCode = pttKeyCode,
+            CustomModes = BuildCustomModesForSave(),
+            DisabledBuiltInModeIds = _originalConfig.DisabledBuiltInModeIds?.ToList() ?? new List<string>()
         };
 
         try
@@ -574,5 +818,42 @@ public class PreferencesWindow : Form
         public ProviderInfo Info { get; }
         public ProviderComboItem(ProviderInfo info) => Info = info;
         public override string ToString() => Info.DisplayName;
+    }
+
+    private class BuiltInModeListItem
+    {
+        private readonly AIMode _mode;
+
+        public BuiltInModeListItem(AIMode mode) => _mode = mode;
+
+        public override string ToString()
+        {
+            var detail = _mode.Id switch
+            {
+                "voice-to-text" => "raw transcription",
+                "super" => "context-aware assistant",
+                _ => "AI processing"
+            };
+
+            return $"{_mode.Name} - {detail}";
+        }
+    }
+
+    private class CustomModeListItem
+    {
+        public int Index { get; }
+        public CustomModeConfig Mode { get; }
+
+        public CustomModeListItem(int index, CustomModeConfig mode)
+        {
+            Index = index;
+            Mode = mode;
+        }
+
+        public override string ToString()
+        {
+            var suffix = Mode.Enabled ? "" : " (disabled)";
+            return $"{Mode.Name}{suffix}";
+        }
     }
 }
