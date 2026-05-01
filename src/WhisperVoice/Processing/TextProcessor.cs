@@ -32,7 +32,7 @@ public class TextProcessor
     /// <param name="mode">AI processing mode</param>
     /// <param name="apiKey">OpenAI API key</param>
     /// <returns>Processed text, or original text if mode doesn't require processing</returns>
-    public async Task<string> ProcessAsync(string text, AIMode mode, string apiKey)
+    public async Task<string> ProcessAsync(string text, AIMode mode, string apiKey, DictationContext? context = null)
     {
         // Brut mode - no processing
         if (!mode.RequiresProcessing || string.IsNullOrEmpty(mode.SystemPrompt))
@@ -42,13 +42,14 @@ public class TextProcessor
         }
 
         Logger.Info($"[TextProcessor] Processing with mode: {mode.Name}");
+        var systemPrompt = BuildSystemPrompt(mode, context);
 
         var request = new ChatCompletionRequest
         {
             Model = Model,
             Messages = new[]
             {
-                new ChatMessage { Role = "system", Content = mode.SystemPrompt },
+                new ChatMessage { Role = "system", Content = systemPrompt },
                 new ChatMessage { Role = "user", Content = text }
             },
             Temperature = 0.3,
@@ -95,6 +96,49 @@ public class TextProcessor
             Logger.Error($"[TextProcessor] HTTP error: {ex.Message}");
             throw;
         }
+    }
+
+    private static string BuildSystemPrompt(AIMode mode, DictationContext? context)
+    {
+        if (!mode.IsSuper)
+        {
+            return mode.SystemPrompt ?? "";
+        }
+
+        var builder = new StringBuilder();
+
+        if (context?.HasSelectedText == true)
+        {
+            builder.AppendLine("Tu es un assistant intelligent. L'utilisateur a selectionne le texte suivant :");
+            builder.AppendLine("---");
+            builder.AppendLine(context.SelectedText);
+            builder.AppendLine("---");
+            builder.AppendLine("Il te donne une instruction vocale a appliquer sur ce texte.");
+        }
+        else
+        {
+            builder.AppendLine("Tu es un assistant intelligent. L'utilisateur te donne une instruction vocale.");
+        }
+
+        builder.AppendLine("Reponds UNIQUEMENT avec le resultat demande, rien d'autre.");
+
+        if (context?.HasAmbientContext == true)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Contexte au moment de la dictee, a utiliser seulement si pertinent :");
+
+            if (!string.IsNullOrWhiteSpace(context.ActiveProcessName))
+            {
+                builder.AppendLine($"- Application active: {context.ActiveProcessName}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(context.ActiveWindowTitle))
+            {
+                builder.AppendLine($"- Titre de fenetre: {context.ActiveWindowTitle}");
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string ExtractErrorMessage(string responseBody)

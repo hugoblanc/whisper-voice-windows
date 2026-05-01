@@ -19,7 +19,8 @@ public class WhisperVoiceApp : Form
     private ITranscriptionProvider _transcriptionProvider;
     private readonly GlobalHotkey _globalHotkey;
     private readonly KeyboardHook _keyboardHook;
-    private readonly KeyboardHook _shiftHook;
+    private readonly KeyboardHook _modeSwitchHook;
+    private readonly KeyboardHook _escapeHook;
     private readonly ModeManager _modeManager;
     private readonly TextProcessor _textProcessor;
 
@@ -30,9 +31,12 @@ public class WhisperVoiceApp : Form
     private PreferencesWindow? _preferencesWindow;
     private RecordingWindow? _recordingWindow;
     private HistoryWindow? _historyWindow;
+    private IntPtr _pasteTargetWindow = IntPtr.Zero;
+    private DictationContext? _recordingContext;
 
     private const int TimeoutSeconds = 45;
-    private const uint VK_SHIFT = 0x10;
+    private const uint VK_TAB = 0x09;
+    private const uint VK_ESCAPE = 0x1B;
 
     public WhisperVoiceApp(AppConfig config)
     {
@@ -50,7 +54,7 @@ public class WhisperVoiceApp : Form
         Logger.Info($"Using transcription provider: {_transcriptionProvider.DisplayName}");
 
         // Initialize AI processing
-        _modeManager = new ModeManager(() => _config.HasOpenAIKeyForProcessing);
+        _modeManager = new ModeManager(() => _config);
         _modeManager.ModeChanged += OnModeChanged;
         _textProcessor = new TextProcessor();
 
@@ -65,7 +69,8 @@ public class WhisperVoiceApp : Form
 
         _globalHotkey = new GlobalHotkey(Handle);
         _keyboardHook = new KeyboardHook();
-        _shiftHook = new KeyboardHook();
+        _modeSwitchHook = new KeyboardHook();
+        _escapeHook = new KeyboardHook();
 
         SetupHotkeys();
     }
@@ -112,6 +117,8 @@ public class WhisperVoiceApp : Form
         // Setup push-to-talk keyboard hook
         var pttKey = _config.GetPushToTalkKeyDescription();
         Logger.Info($"Setting up PTT keyboard hook for: {pttKey}");
+        _keyboardHook.KeyDown -= OnPttKeyDown;
+        _keyboardHook.KeyUp -= OnPttKeyUp;
         _keyboardHook.KeyDown += OnPttKeyDown;
         _keyboardHook.KeyUp += OnPttKeyUp;
 
@@ -126,17 +133,32 @@ public class WhisperVoiceApp : Form
             errors.Add($"Push-to-Talk ({pttKey}): Failed to install keyboard hook. Your antivirus may be blocking it.");
         }
 
-        // Setup Shift key hook for mode switching during recording
-        _shiftHook.KeyDown += OnShiftKeyDown;
+        // Setup Tab key hook for mode switching during recording
+        _modeSwitchHook.KeyDown -= OnModeSwitchKeyDown;
+        _modeSwitchHook.KeyDown += OnModeSwitchKeyDown;
+        _modeSwitchHook.ShouldSuppressKey = () => _state == AppState.Recording;
         try
         {
-            _shiftHook.Start(VK_SHIFT);
-            Logger.Info("Shift key hook installed for mode switching");
+            _modeSwitchHook.Start(VK_TAB);
+            Logger.Info("Tab key hook installed for mode switching");
         }
         catch (Exception ex)
         {
-            Logger.Warn($"Failed to install Shift key hook: {ex.Message}");
+            Logger.Warn($"Failed to install Tab key hook: {ex.Message}");
             // Non-critical, don't show error to user
+        }
+
+        // Setup Escape key hook for cancelling recording while the overlay is not focused
+        _escapeHook.KeyDown -= OnEscapeKeyDown;
+        _escapeHook.KeyDown += OnEscapeKeyDown;
+        try
+        {
+            _escapeHook.Start(VK_ESCAPE);
+            Logger.Info("Escape key hook installed for recording cancellation");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to install Escape key hook: {ex.Message}");
         }
 
         // Show consolidated error notification
@@ -182,28 +204,48 @@ public class WhisperVoiceApp : Form
 
     private void OnPttKeyDown()
     {
-        if (_state == AppState.Idle)
+        RunOnUiThread(() =>
         {
-            StartRecording();
-        }
+            if (_state == AppState.Idle)
+            {
+                StartRecording();
+            }
+        });
     }
 
     private void OnPttKeyUp()
     {
-        if (_state == AppState.Recording)
+        RunOnUiThread(() =>
         {
-            StopRecordingAndTranscribe();
-        }
+            if (_state == AppState.Recording)
+            {
+                StopRecordingAndTranscribe();
+            }
+        });
     }
 
-    private void OnShiftKeyDown()
+    private void OnModeSwitchKeyDown()
     {
-        // Only switch modes while recording
-        if (_state == AppState.Recording)
+        RunOnUiThread(() =>
         {
-            var newMode = _modeManager.NextMode();
-            Logger.Info($"Mode switched to: {newMode.Name}");
-        }
+            // Only switch modes while recording
+            if (_state == AppState.Recording)
+            {
+                var newMode = _modeManager.NextMode();
+                Logger.Info($"Mode switched to: {newMode.Name}");
+            }
+        });
+    }
+
+    private void OnEscapeKeyDown()
+    {
+        RunOnUiThread(() =>
+        {
+            if (_state == AppState.Recording)
+            {
+                OnRecordingCancelled();
+            }
+        });
     }
 
     private void StartRecording()
@@ -213,18 +255,26 @@ public class WhisperVoiceApp : Form
         Logger.Info("Starting recording...");
         try
         {
+            _pasteTargetWindow = ClipboardPaste.CaptureTargetWindow();
+            Logger.Debug($"Captured paste target window: 0x{_pasteTargetWindow.ToInt64():X}");
+            _recordingContext = WindowsContextCapturer.Capture(
+                _pasteTargetWindow,
+                includeSelectedText: false);
+
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+            _recorder.AudioLevelChanged += OnAudioLevelChanged;
             _recorder.StartRecording();
             SetState(AppState.Recording);
             Logger.Info("Recording started successfully");
 
             // Show recording window
             ShowRecordingWindow();
-
-            // Connect audio level to recording window
-            _recorder.AudioLevelChanged += OnAudioLevelChanged;
         }
         catch (Exception ex)
         {
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+            _pasteTargetWindow = IntPtr.Zero;
+            _recordingContext = null;
             Logger.Error("Failed to start recording", ex);
             _trayIcon.ShowNotification("Recording Error", ex.Message, ToolTipIcon.Error);
         }
@@ -238,11 +288,20 @@ public class WhisperVoiceApp : Form
         _recordingWindow = new RecordingWindow();
         _recordingWindow.SetMode(_modeManager.CurrentMode.Name);
         _recordingWindow.CancelRequested += OnRecordingCancelled;
+        _recordingWindow.ModeCycleRequested += CycleModeDuringRecording;
         _recordingWindow.FormClosed += (_, _) => _recordingWindow = null;
         _recordingWindow.Show();
     }
 
-    private void OnRecordingCancelled()
+    private void CycleModeDuringRecording()
+    {
+        if (_state != AppState.Recording) return;
+
+        var newMode = _modeManager.NextMode();
+        Logger.Info($"Mode switched from recording window to: {newMode.Name}");
+    }
+
+    private async void OnRecordingCancelled()
     {
         Logger.Info("Recording cancelled by user");
         if (_state == AppState.Recording)
@@ -250,9 +309,26 @@ public class WhisperVoiceApp : Form
             // Disconnect audio level event
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
 
-            _recorder.StopRecording();
-            CloseRecordingWindow();
-            SetState(AppState.Idle);
+            SetState(AppState.Transcribing);
+            _recordingWindow?.SetState(AppState.Transcribing);
+
+            string? audioPath = null;
+            try
+            {
+                audioPath = await Task.Run(() => _recorder.StopRecording());
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to cancel recording cleanly", ex);
+            }
+            finally
+            {
+                AudioRecorder.CleanupTempFile(audioPath);
+                CloseRecordingWindow();
+                _pasteTargetWindow = IntPtr.Zero;
+                _recordingContext = null;
+                SetState(AppState.Idle);
+            }
         }
     }
 
@@ -279,22 +355,26 @@ public class WhisperVoiceApp : Form
 
         // Capture current mode before stopping (it might change)
         var currentMode = _modeManager.CurrentMode;
+        var pasteTargetWindow = _pasteTargetWindow;
+        var recordingContext = _recordingContext;
+        string? audioPath = null;
 
         Logger.Info("Stopping recording...");
 
         // Disconnect audio level event
         _recorder.AudioLevelChanged -= OnAudioLevelChanged;
 
-        var audioPath = _recorder.StopRecording();
         SetState(AppState.Transcribing);
         _recordingWindow?.SetState(AppState.Transcribing);
-        Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
 
         // Start timeout timer
         StartTimeoutTimer();
 
         try
         {
+            audioPath = await Task.Run(() => _recorder.StopRecording());
+            Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
+
             if (string.IsNullOrEmpty(audioPath))
             {
                 throw new InvalidOperationException("No audio recorded");
@@ -302,6 +382,16 @@ public class WhisperVoiceApp : Form
 
             var fileInfo = new FileInfo(audioPath);
             Logger.Info($"Audio file size: {fileInfo.Length} bytes");
+
+            if (currentMode.IsSuper && recordingContext?.HasSelectedText != true)
+            {
+                await Task.Delay(120);
+                var capturedContext = WindowsContextCapturer.Capture(pasteTargetWindow, includeSelectedText: true);
+                if (capturedContext.HasSelectedText || capturedContext.HasAmbientContext)
+                {
+                    recordingContext = capturedContext;
+                }
+            }
 
             // Step 1: Transcribe audio
             Logger.Info($"Sending audio to {_transcriptionProvider.DisplayName}...");
@@ -324,7 +414,7 @@ public class WhisperVoiceApp : Form
                 {
                     try
                     {
-                        text = await _textProcessor.ProcessAsync(text, currentMode, apiKey);
+                        text = await _textProcessor.ProcessAsync(text, currentMode, apiKey, recordingContext);
                         Logger.Info($"AI processing complete: {text.Length} chars");
                     }
                     catch (Exception ex)
@@ -340,8 +430,14 @@ public class WhisperVoiceApp : Form
             }
 
             // Step 3: Paste result
-            ClipboardPaste.Paste(text);
-            // No notification - text is already pasted at cursor
+            CloseRecordingWindow();
+            await Task.Delay(75);
+
+            var pasted = ClipboardPaste.Paste(text, pasteTargetWindow);
+            if (!pasted)
+            {
+                _trayIcon.ShowNotification("Paste Warning", "Transcription copied to clipboard, but automatic paste may have failed.", ToolTipIcon.Warning);
+            }
 
             // Step 4: Save to history
             TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
@@ -357,8 +453,24 @@ public class WhisperVoiceApp : Form
             StopTimeoutTimer();
             AudioRecorder.CleanupTempFile(audioPath);
             CloseRecordingWindow();
+            _pasteTargetWindow = IntPtr.Zero;
+            _recordingContext = null;
             SetState(AppState.Idle);
         }
+    }
+
+    private void RunOnUiThread(Action action)
+    {
+        if (IsDisposed) return;
+
+        if (InvokeRequired)
+        {
+            if (!IsHandleCreated) return;
+            BeginInvoke(action);
+            return;
+        }
+
+        action();
     }
 
     private void SetState(AppState state)
@@ -369,18 +481,34 @@ public class WhisperVoiceApp : Form
 
     private void ShowPreferences()
     {
-        // If already open, bring to front
-        if (_preferencesWindow != null && !_preferencesWindow.IsDisposed)
+        RunOnUiThread(() =>
         {
-            _preferencesWindow.BringToFront();
-            _preferencesWindow.Activate();
-            return;
-        }
+            try
+            {
+                Logger.Info("Opening Preferences window...");
 
-        _preferencesWindow = new PreferencesWindow(_config);
-        _preferencesWindow.SettingsSaved += OnSettingsSaved;
-        _preferencesWindow.FormClosed += (_, _) => _preferencesWindow = null;
-        _preferencesWindow.Show();
+                // If already open, bring to front
+                if (_preferencesWindow != null && !_preferencesWindow.IsDisposed)
+                {
+                    BringWindowToFront(_preferencesWindow);
+                    return;
+                }
+
+                _preferencesWindow = new PreferencesWindow(_config);
+                _preferencesWindow.SettingsSaved += OnSettingsSaved;
+                _preferencesWindow.FormClosed += (_, _) => _preferencesWindow = null;
+                _preferencesWindow.Show();
+                BringWindowToFront(_preferencesWindow);
+
+                Logger.Info("Preferences window opened");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to open Preferences window", ex);
+                _preferencesWindow = null;
+                _trayIcon.ShowNotification("Preferences Error", ex.Message, ToolTipIcon.Error);
+            }
+        });
     }
 
     private void ShowHistoryWindow()
@@ -398,6 +526,21 @@ public class WhisperVoiceApp : Form
         _historyWindow.Show();
     }
 
+    private static void BringWindowToFront(Form window)
+    {
+        if (window.WindowState == FormWindowState.Minimized)
+        {
+            window.WindowState = FormWindowState.Normal;
+        }
+
+        window.ShowInTaskbar = true;
+        window.Show();
+        window.Activate();
+        window.BringToFront();
+        window.TopMost = true;
+        window.TopMost = false;
+    }
+
     private void OnSettingsSaved(AppConfig newConfig)
     {
         var providerChanged = newConfig.Provider != _config.Provider ||
@@ -407,6 +550,7 @@ public class WhisperVoiceApp : Form
                                newConfig.PushToTalkKeyCode != _config.PushToTalkKeyCode;
 
         _config = newConfig;
+        _modeManager.ReloadModes();
 
         if (providerChanged)
         {
@@ -445,8 +589,16 @@ public class WhisperVoiceApp : Form
             _toggleHotkeyId = 0;
         }
 
-        // Stop PTT hook
+        if (_historyHotkeyId != 0)
+        {
+            _globalHotkey.Unregister(_historyHotkeyId);
+            _historyHotkeyId = 0;
+        }
+
+        // Stop hooks before registering them again
         _keyboardHook.Stop();
+        _modeSwitchHook.Stop();
+        _escapeHook.Stop();
 
         // Re-register with new config
         SetupHotkeys();
@@ -481,7 +633,8 @@ public class WhisperVoiceApp : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        _shiftHook.Dispose();
+        _modeSwitchHook.Dispose();
+        _escapeHook.Dispose();
         _keyboardHook.Dispose();
         _globalHotkey.Dispose();
         _recorder.Dispose();
