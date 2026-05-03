@@ -33,6 +33,11 @@ public class WhisperVoiceApp : Form
     private HistoryWindow? _historyWindow;
     private IntPtr _pasteTargetWindow = IntPtr.Zero;
     private DictationContext? _recordingContext;
+    private RecordingJournalSession? _recordingJournal;
+    private DateTime? _recordingStartedAt;
+    private bool _isStartingRecorder;
+    private bool _stopRequestedAfterRecorderStart;
+    private bool _cancelRequestedAfterRecorderStart;
 
     private const int TimeoutSeconds = 45;
     private const uint VK_TAB = 0x09;
@@ -50,6 +55,7 @@ public class WhisperVoiceApp : Form
         Opacity = 0;
 
         _recorder = new AudioRecorder();
+        _recorder.SetCaptureMode(config.AudioCaptureMode);
         _transcriptionProvider = TranscriptionProviderFactory.Create(config);
         Logger.Info($"Using transcription provider: {_transcriptionProvider.DisplayName}");
 
@@ -73,6 +79,31 @@ public class WhisperVoiceApp : Form
         _escapeHook = new KeyboardHook();
 
         SetupHotkeys();
+        ApplyAudioCaptureMode(warmImmediately: true);
+    }
+
+    private void WarmUpRecorder()
+    {
+        if (_config.AudioCaptureMode != AudioCaptureMode.Instant) return;
+
+        _ = _recorder.WarmUpAsync().ContinueWith(task =>
+        {
+            if (task.Exception != null)
+            {
+                Logger.Warn($"Audio recorder warm-up failed: {task.Exception.GetBaseException().Message}");
+            }
+        }, TaskScheduler.Default);
+    }
+
+    private void ApplyAudioCaptureMode(bool warmImmediately)
+    {
+        _recorder.SetCaptureMode(_config.AudioCaptureMode);
+        Logger.Info($"Audio capture mode active: {_config.AudioCaptureMode}");
+
+        if (warmImmediately && _config.AudioCaptureMode == AudioCaptureMode.Instant)
+        {
+            WarmUpRecorder();
+        }
     }
 
     private void OnModeChanged(AIMode mode)
@@ -248,36 +279,130 @@ public class WhisperVoiceApp : Form
         });
     }
 
-    private void StartRecording()
+    private async void StartRecording()
     {
         if (_state != AppState.Idle) return;
 
         Logger.Info("Starting recording...");
+        var journal = RecordingJournal.Start(_config.Provider, _transcriptionProvider.DisplayName, _modeManager.CurrentMode.Name);
+        _recordingJournal = journal;
+        _isStartingRecorder = false;
+        _stopRequestedAfterRecorderStart = false;
+        _cancelRequestedAfterRecorderStart = false;
+
         try
         {
-            _pasteTargetWindow = ClipboardPaste.CaptureTargetWindow();
-            Logger.Debug($"Captured paste target window: 0x{_pasteTargetWindow.ToInt64():X}");
-            _recordingContext = WindowsContextCapturer.Capture(
-                _pasteTargetWindow,
-                includeSelectedText: false);
+            var prepareStep = journal.StartStep("prepare_recording");
+            try
+            {
+                _pasteTargetWindow = ClipboardPaste.CaptureTargetWindow();
+                Logger.Debug($"Captured paste target window: 0x{_pasteTargetWindow.ToInt64():X}");
+                _recordingContext = WindowsContextCapturer.Capture(
+                    _pasteTargetWindow,
+                    includeSelectedText: false);
+                prepareStep.Complete("ok", $"target=0x{_pasteTargetWindow.ToInt64():X}");
+            }
+            catch (Exception ex)
+            {
+                prepareStep.Fail(ex);
+                throw;
+            }
+
+            ApplyAutoMode(_recordingContext, journal);
 
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
             _recorder.AudioLevelChanged += OnAudioLevelChanged;
-            _recorder.StartRecording();
-            SetState(AppState.Recording);
+
+            _isStartingRecorder = true;
+            _recordingStartedAt = DateTime.Now;
+            var recorderWasWarm = _recorder.IsWarmedUp;
+            var startRecorderStep = journal.StartStep("start_recorder");
+            var startRecorderTask = Task.Run(() => _recorder.StartRecording());
+
+            journal.Track("show_recording_window", () =>
+            {
+                SetState(AppState.Recording);
+                ShowRecordingWindow();
+                if (!recorderWasWarm)
+                {
+                    _recordingWindow?.SetStarting();
+                }
+            });
+
+            try
+            {
+                await startRecorderTask;
+                var recorderStartDetail = $"{_config.AudioCaptureMode.ToString().ToLowerInvariant()}; {(recorderWasWarm ? "warm" : "cold fallback")}";
+                startRecorderStep.Complete("ok", recorderStartDetail);
+            }
+            catch (Exception ex)
+            {
+                startRecorderStep.Fail(ex);
+                throw;
+            }
+
+            _isStartingRecorder = false;
+
+            if (_cancelRequestedAfterRecorderStart || _state != AppState.Recording || _recordingJournal != journal)
+            {
+                Logger.Info("Recording start completed after cancellation; stopping recorder");
+                _cancelRequestedAfterRecorderStart = false;
+                _stopRequestedAfterRecorderStart = false;
+
+                if (_state == AppState.Recording && _recordingJournal == journal)
+                {
+                    OnRecordingCancelled();
+                }
+                else
+                {
+                    var audioPath = await Task.Run(() => _recorder.StopRecording());
+                    CleanupAfterRecording(audioPath, journal);
+                }
+
+                return;
+            }
+
+            _recordingWindow?.SetState(AppState.Recording);
+
             Logger.Info("Recording started successfully");
 
-            // Show recording window
-            ShowRecordingWindow();
+            if (_stopRequestedAfterRecorderStart)
+            {
+                _stopRequestedAfterRecorderStart = false;
+                StopRecordingAndTranscribe();
+            }
         }
         catch (Exception ex)
         {
+            _isStartingRecorder = false;
+            _stopRequestedAfterRecorderStart = false;
+            _cancelRequestedAfterRecorderStart = false;
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
             _pasteTargetWindow = IntPtr.Zero;
             _recordingContext = null;
+            _recordingStartedAt = null;
+            CloseRecordingWindow();
+            SetState(AppState.Idle);
+            journal.Finish("failed", ex.Message);
+            _recordingJournal = null;
             Logger.Error("Failed to start recording", ex);
             _trayIcon.ShowNotification("Recording Error", ex.Message, ToolTipIcon.Error);
         }
+    }
+
+    private void ApplyAutoMode(DictationContext? context, RecordingJournalSession journal)
+    {
+        if (context == null) return;
+
+        var mode = _modeManager.ResolveAutoMode(context, out var matchedRule);
+        if (mode == null || matchedRule == null) return;
+
+        _modeManager.SetMode(mode.Id);
+        journal.SetMode(mode.Name);
+
+        var detail = $"rule={matchedRule.Name}; mode={mode.Name}; app={context.ActiveProcessName ?? "unknown"}; title={context.ActiveWindowTitle ?? ""}";
+        journal.AddEvent("auto_mode", "ok", detail);
+        Logger.Info($"Auto mode matched: {detail}");
     }
 
     private void ShowRecordingWindow()
@@ -285,9 +410,10 @@ public class WhisperVoiceApp : Form
         // Close existing window if any
         _recordingWindow?.Close();
 
-        _recordingWindow = new RecordingWindow();
+        _recordingWindow = new RecordingWindow(_pasteTargetWindow);
         _recordingWindow.SetMode(_modeManager.CurrentMode.Name);
         _recordingWindow.CancelRequested += OnRecordingCancelled;
+        _recordingWindow.StopRequested += StopRecordingAndTranscribe;
         _recordingWindow.ModeCycleRequested += CycleModeDuringRecording;
         _recordingWindow.FormClosed += (_, _) => _recordingWindow = null;
         _recordingWindow.Show();
@@ -306,6 +432,17 @@ public class WhisperVoiceApp : Form
         Logger.Info("Recording cancelled by user");
         if (_state == AppState.Recording)
         {
+            if (_isStartingRecorder)
+            {
+                _cancelRequestedAfterRecorderStart = true;
+                Logger.Info("Recording cancellation queued while recorder is starting");
+                _recordingWindow?.SetStarting();
+                return;
+            }
+
+            var journal = _recordingJournal;
+            var recordingStartedAt = _recordingStartedAt;
+
             // Disconnect audio level event
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
 
@@ -315,19 +452,31 @@ public class WhisperVoiceApp : Form
             string? audioPath = null;
             try
             {
-                audioPath = await Task.Run(() => _recorder.StopRecording());
+                if (recordingStartedAt.HasValue)
+                {
+                    journal?.AddDurationStep("record_audio", recordingStartedAt.Value, DateTime.Now, "cancelled");
+                }
+
+                audioPath = journal != null
+                    ? await journal.TrackAsync("stop_recorder", () => Task.Run(() => _recorder.StopRecording()),
+                        path => string.IsNullOrEmpty(path) ? "no audio path" : Path.GetFileName(path))
+                    : await Task.Run(() => _recorder.StopRecording());
             }
             catch (Exception ex)
             {
                 Logger.Error("Failed to cancel recording cleanly", ex);
+                journal?.AddEvent("cancel_cleanup_error", "failed", ex.Message);
             }
             finally
             {
-                AudioRecorder.CleanupTempFile(audioPath);
-                CloseRecordingWindow();
+                CleanupAfterRecording(audioPath, journal);
+
                 _pasteTargetWindow = IntPtr.Zero;
                 _recordingContext = null;
+                _recordingStartedAt = null;
                 SetState(AppState.Idle);
+                journal?.Finish("cancelled");
+                _recordingJournal = null;
             }
         }
     }
@@ -353,13 +502,25 @@ public class WhisperVoiceApp : Form
     {
         if (_state != AppState.Recording) return;
 
+        if (_isStartingRecorder)
+        {
+            _stopRequestedAfterRecorderStart = true;
+            Logger.Info("Recording stop queued while recorder is starting");
+            return;
+        }
+
         // Capture current mode before stopping (it might change)
         var currentMode = _modeManager.CurrentMode;
         var pasteTargetWindow = _pasteTargetWindow;
         var recordingContext = _recordingContext;
+        var journal = _recordingJournal;
+        var recordingStartedAt = _recordingStartedAt;
+        var finalStatus = "completed";
+        string? finalError = null;
         string? audioPath = null;
 
         Logger.Info("Stopping recording...");
+        journal?.SetMode(currentMode.Name);
 
         // Disconnect audio level event
         _recorder.AudioLevelChanged -= OnAudioLevelChanged;
@@ -372,7 +533,15 @@ public class WhisperVoiceApp : Form
 
         try
         {
-            audioPath = await Task.Run(() => _recorder.StopRecording());
+            if (recordingStartedAt.HasValue)
+            {
+                journal?.AddDurationStep("record_audio", recordingStartedAt.Value, DateTime.Now, "ok", $"mode={currentMode.Name}");
+            }
+
+            audioPath = journal != null
+                ? await journal.TrackAsync("stop_recorder", () => Task.Run(() => _recorder.StopRecording()),
+                    path => string.IsNullOrEmpty(path) ? "no audio path" : Path.GetFileName(path))
+                : await Task.Run(() => _recorder.StopRecording());
             Logger.Info($"Recording stopped. Audio file: {audioPath}, Mode: {currentMode.Name}");
 
             if (string.IsNullOrEmpty(audioPath))
@@ -382,11 +551,18 @@ public class WhisperVoiceApp : Form
 
             var fileInfo = new FileInfo(audioPath);
             Logger.Info($"Audio file size: {fileInfo.Length} bytes");
+            journal?.SetAudioBytes(fileInfo.Length);
 
             if (currentMode.IsSuper && recordingContext?.HasSelectedText != true)
             {
-                await Task.Delay(120);
-                var capturedContext = WindowsContextCapturer.Capture(pasteTargetWindow, includeSelectedText: true);
+                var capturedContext = journal != null
+                    ? await journal.TrackAsync("capture_super_context", async () =>
+                    {
+                        await Task.Delay(120);
+                        return WindowsContextCapturer.Capture(pasteTargetWindow, includeSelectedText: true);
+                    }, ctx => ctx.HasSelectedText ? $"selected={ctx.SelectedText!.Length} chars" : "no selected text")
+                    : WindowsContextCapturer.Capture(pasteTargetWindow, includeSelectedText: true);
+
                 if (capturedContext.HasSelectedText || capturedContext.HasAmbientContext)
                 {
                     recordingContext = capturedContext;
@@ -395,16 +571,22 @@ public class WhisperVoiceApp : Form
 
             // Step 1: Transcribe audio
             Logger.Info($"Sending audio to {_transcriptionProvider.DisplayName}...");
-            var text = await _transcriptionProvider.TranscribeAsync(audioPath);
+            var text = journal != null
+                ? await journal.TrackAsync("transcribe_audio", () => _transcriptionProvider.TranscribeAsync(audioPath),
+                    result => $"{result.Length} chars")
+                : await _transcriptionProvider.TranscribeAsync(audioPath);
 
             if (string.IsNullOrWhiteSpace(text))
             {
                 Logger.Warn("Transcription returned empty text");
+                finalStatus = "empty";
+                finalError = "Transcription returned empty text";
                 return;
             }
 
             Logger.Info($"Transcription received: {text.Length} chars");
             Logger.Debug($"Transcription text: {text}");
+            journal?.SetRawTextChars(text.Length);
 
             // Step 2: Apply AI processing if mode requires it
             if (currentMode.RequiresProcessing)
@@ -412,50 +594,106 @@ public class WhisperVoiceApp : Form
                 var apiKey = _config.GetOpenAIKeyForProcessing();
                 if (!string.IsNullOrEmpty(apiKey))
                 {
+                    JournalStepScope? processingStep = null;
                     try
                     {
+                        processingStep = journal?.StartStep("ai_processing");
                         text = await _textProcessor.ProcessAsync(text, currentMode, apiKey, recordingContext);
+                        processingStep?.Complete("ok", $"{text.Length} chars");
                         Logger.Info($"AI processing complete: {text.Length} chars");
                     }
                     catch (Exception ex)
                     {
+                        processingStep?.Warn(ex.Message);
                         Logger.Warn($"AI processing failed, using raw transcription: {ex.Message}");
                         // Continue with raw transcription
                     }
                 }
                 else
                 {
+                    journal?.AddEvent("ai_processing", "skipped", "no OpenAI key available");
                     Logger.Warn("AI mode selected but no OpenAI key available");
                 }
             }
+            else
+            {
+                journal?.AddEvent("ai_processing", "skipped", "mode does not require processing");
+            }
+
+            journal?.SetFinalTextChars(text.Length);
 
             // Step 3: Paste result
-            CloseRecordingWindow();
-            await Task.Delay(75);
+            if (journal != null)
+            {
+                await journal.TrackAsync("close_recording_window", async () =>
+                {
+                    CloseRecordingWindow();
+                    await Task.Delay(75);
+                });
+            }
+            else
+            {
+                CloseRecordingWindow();
+                await Task.Delay(75);
+            }
 
-            var pasted = ClipboardPaste.Paste(text, pasteTargetWindow);
+            var pasted = journal != null
+                ? journal.Track("paste_result", () => ClipboardPaste.Paste(text, pasteTargetWindow),
+                    result => result ? "paste sent" : "clipboard only")
+                : ClipboardPaste.Paste(text, pasteTargetWindow);
+            journal?.SetPasted(pasted);
             if (!pasted)
             {
+                journal?.AddEvent("paste_warning", "warning", "automatic paste may have failed");
                 _trayIcon.ShowNotification("Paste Warning", "Transcription copied to clipboard, but automatic paste may have failed.", ToolTipIcon.Warning);
             }
 
             // Step 4: Save to history
-            TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
+            if (journal != null)
+            {
+                journal.Track("save_history", () => TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name));
+            }
+            else
+            {
+                TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
+            }
             Logger.Debug("Transcription saved to history");
         }
         catch (Exception ex)
         {
+            finalStatus = "failed";
+            finalError = ex.Message;
             Logger.Error("Transcription failed", ex);
             _trayIcon.ShowNotification("Transcription Error", ex.Message, ToolTipIcon.Error);
         }
         finally
         {
             StopTimeoutTimer();
-            AudioRecorder.CleanupTempFile(audioPath);
-            CloseRecordingWindow();
+            CleanupAfterRecording(audioPath, journal);
+
             _pasteTargetWindow = IntPtr.Zero;
             _recordingContext = null;
+            _recordingStartedAt = null;
             SetState(AppState.Idle);
+            journal?.Finish(finalStatus, finalError);
+            _recordingJournal = null;
+        }
+    }
+
+    private void CleanupAfterRecording(string? audioPath, RecordingJournalSession? journal)
+    {
+        var step = journal?.StartStep("cleanup");
+
+        try
+        {
+            AudioRecorder.CleanupTempFile(audioPath);
+            CloseRecordingWindow();
+            step?.Complete();
+        }
+        catch (Exception ex)
+        {
+            step?.Fail(ex);
+            Logger.Warn($"Recording cleanup failed: {ex.Message}");
         }
     }
 
@@ -548,6 +786,7 @@ public class WhisperVoiceApp : Form
         var shortcutsChanged = newConfig.ShortcutModifiers != _config.ShortcutModifiers ||
                                newConfig.ShortcutKeyCode != _config.ShortcutKeyCode ||
                                newConfig.PushToTalkKeyCode != _config.PushToTalkKeyCode;
+        var audioCaptureModeChanged = newConfig.AudioCaptureMode != _config.AudioCaptureMode;
 
         _config = newConfig;
         _modeManager.ReloadModes();
@@ -560,6 +799,11 @@ public class WhisperVoiceApp : Form
         if (shortcutsChanged)
         {
             ReloadHotkeys();
+        }
+
+        if (audioCaptureModeChanged)
+        {
+            ApplyAudioCaptureMode(warmImmediately: true);
         }
 
         // Update tray menu labels

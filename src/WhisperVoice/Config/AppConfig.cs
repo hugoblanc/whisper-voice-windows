@@ -1,6 +1,14 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WhisperVoice.Config;
+
+public enum AudioCaptureMode
+{
+    Instant,
+    Balanced,
+    Privacy
+}
 
 public class AppConfig
 {
@@ -12,6 +20,9 @@ public class AppConfig
     public uint PushToTalkKeyCode { get; set; } = 0x72;   // VK_F3
     public List<CustomModeConfig> CustomModes { get; set; } = new();
     public List<string> DisabledBuiltInModeIds { get; set; } = new();
+    public AudioCaptureMode AudioCaptureMode { get; set; } = AudioCaptureMode.Instant;
+    public bool AutoModeEnabled { get; set; } = true;
+    public List<AutoModeRuleConfig> AutoModeRules { get; set; } = AutoModeRuleConfig.CreateDefaults();
 
     /// <summary>
     /// Get the API key for the specified provider, falling back to main ApiKey for backward compatibility
@@ -61,7 +72,8 @@ public class AppConfig
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
     public static string ConfigDirectory =>
@@ -100,12 +112,24 @@ public class AppConfig
         ProviderApiKeys ??= new Dictionary<string, string>();
         CustomModes ??= new List<CustomModeConfig>();
         DisabledBuiltInModeIds ??= new List<string>();
+        AutoModeRules ??= AutoModeRuleConfig.CreateDefaults();
+        if (!Enum.IsDefined(AudioCaptureMode))
+        {
+            AudioCaptureMode = AudioCaptureMode.Instant;
+        }
 
         var existingIds = new HashSet<string>(DisabledBuiltInModeIds, StringComparer.OrdinalIgnoreCase);
         foreach (var mode in CustomModes.Where(m => m.IsValid))
         {
             mode.EnsureId(existingIds);
             existingIds.Add(mode.Id);
+        }
+
+        var existingRuleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in AutoModeRules)
+        {
+            rule.EnsureId(existingRuleIds);
+            existingRuleIds.Add(rule.Id);
         }
     }
 
@@ -145,4 +169,113 @@ public class AppConfig
         0x7B => "F12",
         _ => $"Key{keyCode:X2}"
     };
+}
+
+public class AutoModeRuleConfig
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public string ProcessName { get; set; } = "";
+    public string WindowTitleContains { get; set; } = "";
+    public string ModeId { get; set; } = "";
+
+    [JsonIgnore]
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(ModeId) &&
+        (!string.IsNullOrWhiteSpace(ProcessName) || !string.IsNullOrWhiteSpace(WindowTitleContains));
+
+    [JsonIgnore]
+    public int Specificity =>
+        (string.IsNullOrWhiteSpace(ProcessName) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(WindowTitleContains) ? 0 : 1);
+
+    public AutoModeRuleConfig Clone() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Enabled = Enabled,
+        ProcessName = ProcessName,
+        WindowTitleContains = WindowTitleContains,
+        ModeId = ModeId
+    };
+
+    public void EnsureId(ISet<string> existingIds)
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = CreateUniqueId(Name, ProcessName, WindowTitleContains, existingIds);
+        }
+    }
+
+    public static List<AutoModeRuleConfig> CreateDefaults() => new()
+    {
+        new AutoModeRuleConfig
+        {
+            Id = "slack_brut",
+            Name = "Slack -> Brut",
+            ProcessName = "Slack",
+            ModeId = "voice-to-text"
+        },
+        new AutoModeRuleConfig
+        {
+            Id = "chrome_gmail_email",
+            Name = "Gmail in Chrome -> Email",
+            ProcessName = "chrome",
+            WindowTitleContains = "Gmail",
+            ModeId = "custom_email"
+        },
+        new AutoModeRuleConfig
+        {
+            Id = "vscode_brut",
+            Name = "VS Code -> Brut",
+            ProcessName = "Code",
+            ModeId = "voice-to-text"
+        }
+    };
+
+    private static string CreateUniqueId(string name, string processName, string title, ISet<string> existingIds)
+    {
+        var seed = string.IsNullOrWhiteSpace(name)
+            ? $"{processName}_{title}_rule"
+            : name;
+        var baseId = "auto_" + Slugify(seed);
+        if (baseId == "auto_")
+        {
+            baseId = "auto_rule";
+        }
+
+        var candidate = baseId;
+        var suffix = 2;
+        while (existingIds.Contains(candidate))
+        {
+            candidate = $"{baseId}_{suffix}";
+            suffix++;
+        }
+
+        return candidate;
+    }
+
+    private static string Slugify(string value)
+    {
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch =>
+            {
+                if (char.IsLetterOrDigit(ch)) return ch;
+                if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_' || ch == '>') return '_';
+                return '\0';
+            })
+            .Where(ch => ch != '\0')
+            .ToArray();
+
+        var slug = new string(chars);
+        while (slug.Contains("__", StringComparison.Ordinal))
+        {
+            slug = slug.Replace("__", "_", StringComparison.Ordinal);
+        }
+
+        return slug.Trim('_');
+    }
 }

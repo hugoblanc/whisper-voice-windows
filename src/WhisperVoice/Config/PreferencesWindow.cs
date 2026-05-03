@@ -14,6 +14,8 @@ public class PreferencesWindow : Form
     private LinkLabel _apiKeyLink = null!;
     private Button _testConnectionButton = null!;
     private Label _connectionStatusLabel = null!;
+    private ComboBox _audioCaptureModeCombo = null!;
+    private Label _audioCaptureModeDescriptionLabel = null!;
 
     // Shortcuts tab
     private ComboBox _shortcutCombo = null!;
@@ -26,10 +28,21 @@ public class PreferencesWindow : Form
     private Button _deleteModeButton = null!;
     private readonly List<CustomModeConfig> _customModes = new();
 
+    // Auto mode tab
+    private CheckBox _autoModeEnabledCheckBox = null!;
+    private DataGridView _autoModeRulesGrid = null!;
+    private Button _editAutoModeRuleButton = null!;
+    private Button _deleteAutoModeRuleButton = null!;
+    private readonly List<AutoModeRuleConfig> _autoModeRules = new();
+
     // Logs tab
     private TextBox _logTextBox = null!;
     private CheckBox _autoScrollCheckBox = null!;
     private System.Windows.Forms.Timer _logRefreshTimer = null!;
+
+    // Journal tab
+    private DataGridView _journalGrid = null!;
+    private TextBox _journalDetailsTextBox = null!;
 
     // Footer
     private Button _saveButton = null!;
@@ -72,11 +85,15 @@ public class PreferencesWindow : Form
         var generalTab = CreateGeneralTab();
         var shortcutsTab = CreateShortcutsTab();
         var modesTab = CreateModesTab();
+        var autoModeTab = CreateAutoModeTab();
+        var journalTab = CreateJournalTab();
         var logsTab = CreateLogsTab();
 
         _tabControl.TabPages.Add(generalTab);
         _tabControl.TabPages.Add(shortcutsTab);
         _tabControl.TabPages.Add(modesTab);
+        _tabControl.TabPages.Add(autoModeTab);
+        _tabControl.TabPages.Add(journalTab);
         _tabControl.TabPages.Add(logsTab);
 
         _footerPanel = new FlowLayoutPanel
@@ -187,11 +204,43 @@ public class PreferencesWindow : Form
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
+        var audioCaptureLabel = new Label
+        {
+            Text = "Recording latency mode:",
+            Location = new Point(15, 220),
+            AutoSize = true
+        };
+
+        _audioCaptureModeCombo = new ComboBox
+        {
+            Location = new Point(15, 242),
+            Size = new Size(260, 25),
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+        _audioCaptureModeCombo.Items.AddRange(new object[]
+        {
+            new AudioCaptureModeComboItem(AudioCaptureMode.Instant, "Instant"),
+            new AudioCaptureModeComboItem(AudioCaptureMode.Balanced, "Balanced"),
+            new AudioCaptureModeComboItem(AudioCaptureMode.Privacy, "Privacy")
+        });
+        _audioCaptureModeCombo.SelectedIndexChanged += (_, _) => UpdateAudioCaptureModeDescription();
+
+        _audioCaptureModeDescriptionLabel = new Label
+        {
+            Text = "",
+            Location = new Point(15, 276),
+            Size = new Size(680, 58),
+            AutoSize = false,
+            ForeColor = Color.Gray,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+
         tab.Controls.AddRange(new Control[]
         {
             providerLabel, _providerCombo,
             apiKeyLabel, _apiKeyTextBox, _apiKeyLink,
-            _testConnectionButton, _connectionStatusLabel
+            _testConnectionButton, _connectionStatusLabel,
+            audioCaptureLabel, _audioCaptureModeCombo, _audioCaptureModeDescriptionLabel
         });
 
         return tab;
@@ -376,6 +425,111 @@ public class PreferencesWindow : Form
         return tab;
     }
 
+    private TabPage CreateAutoModeTab()
+    {
+        var tab = new TabPage("Auto Mode");
+        tab.Padding = new Padding(12);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Padding = new Padding(4)
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+
+        _autoModeEnabledCheckBox = new CheckBox
+        {
+            Text = "Automatically select mode from the active app or window title",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 10)
+        };
+
+        _autoModeRulesGrid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.FixedSingle,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+            MultiSelect = false,
+            ReadOnly = true,
+            RowHeadersVisible = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        _autoModeRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", FillWeight = 36 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "Rule", FillWeight = 140 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Process", HeaderText = "App process", FillWeight = 90 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "Title contains", FillWeight = 130 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode", FillWeight = 90 });
+        _autoModeRulesGrid.SelectionChanged += (_, _) => UpdateAutoModeRuleButtons();
+        _autoModeRulesGrid.DoubleClick += (_, _) => EditSelectedAutoModeRule();
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 8, 0, 4),
+            Margin = Padding.Empty
+        };
+
+        var addRuleButton = new Button
+        {
+            Text = "Add...",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat
+        };
+        addRuleButton.Click += AddAutoModeRuleButton_Click;
+
+        _editAutoModeRuleButton = new Button
+        {
+            Text = "Edit...",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _editAutoModeRuleButton.Click += (_, _) => EditSelectedAutoModeRule();
+
+        _deleteAutoModeRuleButton = new Button
+        {
+            Text = "Delete",
+            Size = new Size(104, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _deleteAutoModeRuleButton.Click += DeleteAutoModeRuleButton_Click;
+
+        buttonPanel.Controls.AddRange(new Control[] { addRuleButton, _editAutoModeRuleButton, _deleteAutoModeRuleButton });
+
+        var hintLabel = new Label
+        {
+            Text = "Rules are evaluated from the most specific match first. A Tab mode switch only affects the current recording.",
+            ForeColor = Color.Gray,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = Padding.Empty
+        };
+
+        root.Controls.Add(_autoModeEnabledCheckBox, 0, 0);
+        root.Controls.Add(_autoModeRulesGrid, 0, 1);
+        root.Controls.Add(buttonPanel, 0, 2);
+        root.Controls.Add(hintLabel, 0, 3);
+
+        tab.Controls.Add(root);
+        return tab;
+    }
+
     private TabPage CreateLogsTab()
     {
         var tab = new TabPage("Logs");
@@ -432,6 +586,102 @@ public class PreferencesWindow : Form
         return tab;
     }
 
+    private TabPage CreateJournalTab()
+    {
+        var tab = new TabPage("Journal");
+        tab.Padding = new Padding(12);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+
+        _journalGrid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.FixedSingle,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+            MultiSelect = false,
+            ReadOnly = true,
+            RowHeadersVisible = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Time", HeaderText = "Time", FillWeight = 90 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", FillWeight = 70 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode", FillWeight = 85 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Provider", HeaderText = "Provider", FillWeight = 90 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Total", HeaderText = "Total", FillWeight = 65 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Recording", HeaderText = "Rec", FillWeight = 65 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Transcribe", HeaderText = "Trans", FillWeight = 65 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Processing", HeaderText = "AI", FillWeight = 65 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Paste", HeaderText = "Paste", FillWeight = 65 });
+        _journalGrid.SelectionChanged += (_, _) => UpdateJournalDetails();
+
+        _journalDetailsTextBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Font = new Font("Consolas", 8.5F),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 6, 0, 0),
+            Margin = Padding.Empty
+        };
+
+        var refreshButton = new Button
+        {
+            Text = "Refresh",
+            Size = new Size(96, 30),
+            FlatStyle = FlatStyle.Flat
+        };
+        refreshButton.Click += (_, _) => RefreshJournal();
+
+        var openFolderButton = new Button
+        {
+            Text = "Open Folder",
+            Size = new Size(112, 30),
+            FlatStyle = FlatStyle.Flat
+        };
+        openFolderButton.Click += (_, _) => RecordingJournal.OpenFolder();
+
+        var clearButton = new Button
+        {
+            Text = "Clear",
+            Size = new Size(96, 30),
+            FlatStyle = FlatStyle.Flat
+        };
+        clearButton.Click += ClearJournalButton_Click;
+
+        buttonPanel.Controls.AddRange(new Control[] { refreshButton, openFolderButton, clearButton });
+
+        root.Controls.Add(_journalGrid, 0, 0);
+        root.Controls.Add(_journalDetailsTextBox, 0, 1);
+        root.Controls.Add(buttonPanel, 0, 2);
+
+        tab.Controls.Add(root);
+        return tab;
+    }
+
     private void AddModeButton_Click(object? sender, EventArgs e)
     {
         using var dialog = new CustomModeEditorDialog(null, GetExistingModeIds());
@@ -473,6 +723,53 @@ public class PreferencesWindow : Form
         RefreshCustomModesList();
     }
 
+    private void AddAutoModeRuleButton_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new AutoModeRuleEditorDialog(null, GetAvailableModesForAutoRules());
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _autoModeRules.Add(dialog.Rule);
+        RefreshAutoModeRulesGrid();
+        if (_autoModeRulesGrid.Rows.Count > 0)
+        {
+            var lastRow = _autoModeRulesGrid.Rows[_autoModeRulesGrid.Rows.Count - 1];
+            lastRow.Selected = true;
+            _autoModeRulesGrid.CurrentCell = lastRow.Cells[0];
+        }
+    }
+
+    private void EditSelectedAutoModeRule()
+    {
+        if (_autoModeRulesGrid.CurrentRow?.Tag is not AutoModeRuleListItem item) return;
+
+        using var dialog = new AutoModeRuleEditorDialog(item.Rule, GetAvailableModesForAutoRules());
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        _autoModeRules[item.Index] = dialog.Rule;
+        RefreshAutoModeRulesGrid();
+        if (item.Index >= 0 && item.Index < _autoModeRulesGrid.Rows.Count)
+        {
+            _autoModeRulesGrid.Rows[item.Index].Selected = true;
+            _autoModeRulesGrid.CurrentCell = _autoModeRulesGrid.Rows[item.Index].Cells[0];
+        }
+    }
+
+    private void DeleteAutoModeRuleButton_Click(object? sender, EventArgs e)
+    {
+        if (_autoModeRulesGrid.CurrentRow?.Tag is not AutoModeRuleListItem item) return;
+
+        var result = MessageBox.Show(
+            $"Delete auto mode rule '{item.Rule.Name}'?",
+            "Delete Auto Mode Rule",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (result != DialogResult.Yes) return;
+
+        _autoModeRules.RemoveAt(item.Index);
+        RefreshAutoModeRulesGrid();
+    }
+
     private void RefreshCustomModesList()
     {
         var previousIndex = _customModesList.SelectedIndex;
@@ -489,6 +786,7 @@ public class PreferencesWindow : Form
         }
 
         UpdateModeButtons();
+        RefreshAutoModeRulesGrid();
     }
 
     private void UpdateModeButtons()
@@ -524,6 +822,87 @@ public class PreferencesWindow : Form
         }
 
         return modes;
+    }
+
+    private List<AutoModeRuleConfig> BuildAutoModeRulesForSave()
+    {
+        var rules = _autoModeRules
+            .Where(rule => rule.IsValid)
+            .Select(rule => rule.Clone())
+            .ToList();
+
+        var existingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in rules)
+        {
+            rule.EnsureId(existingIds);
+            existingIds.Add(rule.Id);
+        }
+
+        return rules;
+    }
+
+    private List<AIMode> GetAvailableModesForAutoRules()
+    {
+        var modes = new List<AIMode>();
+        modes.AddRange(AIMode.BuiltInModes);
+        modes.AddRange(_customModes.Where(mode => mode.Enabled && mode.IsValid).Select(AIMode.FromCustom));
+        return modes;
+    }
+
+    private void RefreshAutoModeRulesGrid()
+    {
+        if (_autoModeRulesGrid == null) return;
+
+        var selectedId = (_autoModeRulesGrid.CurrentRow?.Tag as AutoModeRuleListItem)?.Rule.Id;
+        _autoModeRulesGrid.Rows.Clear();
+
+        for (var i = 0; i < _autoModeRules.Count; i++)
+        {
+            var rule = _autoModeRules[i];
+            var rowIndex = _autoModeRulesGrid.Rows.Add(
+                rule.Enabled,
+                string.IsNullOrWhiteSpace(rule.Name) ? BuildAutoModeRuleName(rule) : rule.Name,
+                string.IsNullOrWhiteSpace(rule.ProcessName) ? "*" : rule.ProcessName,
+                string.IsNullOrWhiteSpace(rule.WindowTitleContains) ? "*" : rule.WindowTitleContains,
+                GetAutoModeRuleModeName(rule.ModeId));
+
+            var row = _autoModeRulesGrid.Rows[rowIndex];
+            row.Tag = new AutoModeRuleListItem(i, rule);
+
+            if (!rule.IsValid || GetAvailableModesForAutoRules().All(mode => !string.Equals(mode.Id, rule.ModeId, StringComparison.OrdinalIgnoreCase)))
+            {
+                row.DefaultCellStyle.ForeColor = Color.DarkOrange;
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectedId) && string.Equals(rule.Id, selectedId, StringComparison.OrdinalIgnoreCase))
+            {
+                row.Selected = true;
+                _autoModeRulesGrid.CurrentCell = row.Cells[0];
+            }
+        }
+
+        UpdateAutoModeRuleButtons();
+    }
+
+    private void UpdateAutoModeRuleButtons()
+    {
+        var hasSelection = _autoModeRulesGrid.CurrentRow?.Tag is AutoModeRuleListItem;
+        _editAutoModeRuleButton.Enabled = hasSelection;
+        _deleteAutoModeRuleButton.Enabled = hasSelection;
+    }
+
+    private string GetAutoModeRuleModeName(string modeId)
+    {
+        var mode = GetAvailableModesForAutoRules()
+            .FirstOrDefault(mode => string.Equals(mode.Id, modeId, StringComparison.OrdinalIgnoreCase));
+        return mode == null ? $"Missing: {modeId}" : mode.Name;
+    }
+
+    private static string BuildAutoModeRuleName(AutoModeRuleConfig rule)
+    {
+        var process = string.IsNullOrWhiteSpace(rule.ProcessName) ? "any app" : rule.ProcessName;
+        var title = string.IsNullOrWhiteSpace(rule.WindowTitleContains) ? "" : $" / {rule.WindowTitleContains}";
+        return $"{process}{title}";
     }
 
     private void LoadCurrentSettings()
@@ -563,17 +942,51 @@ public class PreferencesWindow : Form
             _pttCombo.SelectedIndex = 2; // F3 default
         }
 
+        for (var i = 0; i < _audioCaptureModeCombo.Items.Count; i++)
+        {
+            if (_audioCaptureModeCombo.Items[i] is AudioCaptureModeComboItem item &&
+                item.Mode == _originalConfig.AudioCaptureMode)
+            {
+                _audioCaptureModeCombo.SelectedIndex = i;
+                break;
+            }
+        }
+
+        if (_audioCaptureModeCombo.SelectedIndex < 0)
+        {
+            _audioCaptureModeCombo.SelectedIndex = 0;
+        }
+
         // Load custom modes
         _customModes.Clear();
         _customModes.AddRange((_originalConfig.CustomModes ?? new List<CustomModeConfig>())
             .Select(mode => mode.Clone()));
         RefreshCustomModesList();
 
+        _autoModeEnabledCheckBox.Checked = _originalConfig.AutoModeEnabled;
+        _autoModeRules.Clear();
+        _autoModeRules.AddRange((_originalConfig.AutoModeRules ?? AutoModeRuleConfig.CreateDefaults())
+            .Select(rule => rule.Clone()));
+        RefreshAutoModeRulesGrid();
+
         // Update UI for selected provider
         UpdateProviderUI();
 
         // Load initial logs
         RefreshLogs();
+        RefreshJournal();
+    }
+
+    private void UpdateAudioCaptureModeDescription()
+    {
+        var mode = (_audioCaptureModeCombo.SelectedItem as AudioCaptureModeComboItem)?.Mode ?? AudioCaptureMode.Instant;
+        _audioCaptureModeDescriptionLabel.Text = mode switch
+        {
+            AudioCaptureMode.Instant => "Keeps the microphone ready in the background for near-zero start latency. No audio is sent until a recording is stopped.",
+            AudioCaptureMode.Balanced => "Opens the microphone on first use, then keeps it ready for 3 minutes after each recording before releasing it.",
+            AudioCaptureMode.Privacy => "Only opens the microphone during active recordings. Start latency depends on Windows and the selected device.",
+            _ => ""
+        };
     }
 
     private void ProviderCombo_Changed(object? sender, EventArgs e)
@@ -700,6 +1113,10 @@ public class PreferencesWindow : Form
             {
                 RefreshLogs();
             }
+            else if (_tabControl.SelectedTab?.Text == "Journal")
+            {
+                RefreshJournal();
+            }
         };
         _logRefreshTimer.Start();
     }
@@ -770,6 +1187,7 @@ public class PreferencesWindow : Form
 
         // Parse PTT key code (F1=0x70, F2=0x71, etc.)
         uint pttKeyCode = (uint)(0x70 + _pttCombo.SelectedIndex);
+        var audioCaptureMode = (_audioCaptureModeCombo.SelectedItem as AudioCaptureModeComboItem)?.Mode ?? AudioCaptureMode.Instant;
 
         var providerApiKeys = new Dictionary<string, string>(
             _originalConfig.ProviderApiKeys ?? new Dictionary<string, string>(),
@@ -789,7 +1207,10 @@ public class PreferencesWindow : Form
             ShortcutKeyCode = 0x20, // VK_SPACE
             PushToTalkKeyCode = pttKeyCode,
             CustomModes = BuildCustomModesForSave(),
-            DisabledBuiltInModeIds = _originalConfig.DisabledBuiltInModeIds?.ToList() ?? new List<string>()
+            DisabledBuiltInModeIds = _originalConfig.DisabledBuiltInModeIds?.ToList() ?? new List<string>(),
+            AudioCaptureMode = audioCaptureMode,
+            AutoModeEnabled = _autoModeEnabledCheckBox.Checked,
+            AutoModeRules = BuildAutoModeRulesForSave()
         };
 
         try
@@ -820,6 +1241,20 @@ public class PreferencesWindow : Form
         public override string ToString() => Info.DisplayName;
     }
 
+    private class AudioCaptureModeComboItem
+    {
+        public AudioCaptureMode Mode { get; }
+        private readonly string _label;
+
+        public AudioCaptureModeComboItem(AudioCaptureMode mode, string label)
+        {
+            Mode = mode;
+            _label = label;
+        }
+
+        public override string ToString() => _label;
+    }
+
     private class BuiltInModeListItem
     {
         private readonly AIMode _mode;
@@ -839,6 +1274,124 @@ public class PreferencesWindow : Form
         }
     }
 
+    private void RefreshJournal()
+    {
+        var entries = RecordingJournal.GetRecentEntries(100);
+        var selectedId = (_journalGrid.CurrentRow?.Tag as RecordingJournalEntry)?.Id;
+
+        _journalGrid.Rows.Clear();
+
+        foreach (var entry in entries)
+        {
+            var rowIndex = _journalGrid.Rows.Add(
+                entry.StartedAt.ToString("HH:mm:ss"),
+                entry.Status,
+                entry.Mode,
+                entry.ProviderName,
+                FormatMs(entry.TotalMs),
+                FormatStepMs(entry, "record_audio"),
+                FormatStepMs(entry, "transcribe_audio"),
+                FormatStepMs(entry, "ai_processing"),
+                FormatStepMs(entry, "paste_result"));
+
+            var row = _journalGrid.Rows[rowIndex];
+            row.Tag = entry;
+
+            if (entry.Status == "failed")
+            {
+                row.DefaultCellStyle.ForeColor = Color.DarkRed;
+            }
+            else if (entry.Status == "cancelled")
+            {
+                row.DefaultCellStyle.ForeColor = Color.DarkOrange;
+            }
+
+            if (entry.Id == selectedId)
+            {
+                row.Selected = true;
+                _journalGrid.CurrentCell = row.Cells[0];
+            }
+        }
+
+        UpdateJournalDetails();
+    }
+
+    private void UpdateJournalDetails()
+    {
+        if (_journalGrid.CurrentRow?.Tag is not RecordingJournalEntry entry)
+        {
+            _journalDetailsTextBox.Text = "No recording selected.";
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            $"Recording {entry.Id} - {entry.Status}",
+            $"Started: {entry.StartedAt:yyyy-MM-dd HH:mm:ss.fff}",
+            $"Provider: {entry.ProviderName} ({entry.ProviderId})",
+            $"Mode: {entry.Mode}",
+            $"Total: {FormatMs(entry.TotalMs)}",
+            $"Audio: {(entry.AudioBytes.HasValue ? FormatBytes(entry.AudioBytes.Value) : "-")}",
+            $"Text: raw={entry.RawTextChars?.ToString() ?? "-"} final={entry.FinalTextChars?.ToString() ?? "-"}",
+            $"Paste: {(entry.Pasted.HasValue ? (entry.Pasted.Value ? "ok" : "warning") : "-")}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(entry.Error))
+        {
+            lines.Add($"Error: {entry.Error}");
+        }
+
+        lines.Add("");
+        lines.Add("Steps:");
+
+        foreach (var step in entry.Steps.OrderBy(step => step.Order))
+        {
+            var detail = string.IsNullOrWhiteSpace(step.Detail) ? "" : $" - {step.Detail}";
+            var error = string.IsNullOrWhiteSpace(step.Error) ? "" : $" - ERROR: {step.Error}";
+            lines.Add($"{step.Order,2}. {step.Name,-24} {FormatMs(step.DurationMs),8}  {step.Status}{detail}{error}");
+        }
+
+        _journalDetailsTextBox.Text = string.Join(Environment.NewLine, lines);
+    }
+
+    private void ClearJournalButton_Click(object? sender, EventArgs e)
+    {
+        var result = MessageBox.Show(
+            "Clear the recording journal?",
+            "Clear Journal",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (result != DialogResult.Yes) return;
+
+        try
+        {
+            RecordingJournal.Clear();
+            RefreshJournal();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to clear journal: {ex.Message}", "Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static string FormatStepMs(RecordingJournalEntry entry, string stepName)
+    {
+        var step = entry.Steps.FirstOrDefault(step => string.Equals(step.Name, stepName, StringComparison.OrdinalIgnoreCase));
+        return step == null ? "-" : FormatMs(step.DurationMs);
+    }
+
+    private static string FormatMs(int ms) =>
+        ms >= 1000 ? $"{ms / 1000.0:0.00}s" : $"{ms}ms";
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:0.00} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.0} KB";
+        return $"{bytes} B";
+    }
+
     private class CustomModeListItem
     {
         public int Index { get; }
@@ -854,6 +1407,18 @@ public class PreferencesWindow : Form
         {
             var suffix = Mode.Enabled ? "" : " (disabled)";
             return $"{Mode.Name}{suffix}";
+        }
+    }
+
+    private class AutoModeRuleListItem
+    {
+        public int Index { get; }
+        public AutoModeRuleConfig Rule { get; }
+
+        public AutoModeRuleListItem(int index, AutoModeRuleConfig rule)
+        {
+            Index = index;
+            Rule = rule;
         }
     }
 }
