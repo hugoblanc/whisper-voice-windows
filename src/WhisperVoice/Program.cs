@@ -51,6 +51,7 @@ internal static class Program
         }
 
         Logger.LogConfig(config);
+        StartupManager.RepairAutoStartPathIfEnabled();
 
         // Check microphone availability at startup
         var micError = AudioRecorder.GetMicrophoneError();

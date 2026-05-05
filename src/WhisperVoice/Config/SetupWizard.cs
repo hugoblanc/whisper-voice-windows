@@ -294,19 +294,6 @@ public class SetupWizard : Form
 
     private static void SetAutoStart(bool enable)
     {
-        var exePath = Application.ExecutablePath;
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-
-        if (key == null) return;
-
-        if (enable)
-        {
-            key.SetValue("WhisperVoice", $"\"{exePath}\"");
-        }
-        else
-        {
-            key.DeleteValue("WhisperVoice", false);
-        }
+        StartupManager.SetAutoStart(enable);
     }
 }
