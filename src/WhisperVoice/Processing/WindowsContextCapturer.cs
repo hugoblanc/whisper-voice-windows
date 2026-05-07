@@ -68,6 +68,11 @@ public static class WindowsContextCapturer
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_C = 0x43;
     private static readonly int[] ModifierKeys = { 0x10, 0x11, 0x12, 0x5B, 0x5C };
+    private const int TreeScopeDescendants = 4;
+    private const int UiaControlTypePropertyId = 30003;
+    private const int UiaNamePropertyId = 30005;
+    private const int UiaValueValuePropertyId = 30045;
+    private const int UiaEditControlTypeId = 50004;
 
     public static DictationContext Capture(IntPtr targetWindow, bool includeSelectedText)
     {
@@ -81,13 +86,14 @@ public static class WindowsContextCapturer
 
         context.ActiveWindowTitle = GetTitle(targetWindow);
         PopulateProcessInfo(targetWindow, context);
+        PopulateEnrichedContext(targetWindow, context);
 
         if (includeSelectedText)
         {
             context.SelectedText = CaptureSelectedText(targetWindow);
         }
 
-        Logger.Debug($"[ContextCapturer] app={context.ActiveProcessName ?? "unknown"} title={context.ActiveWindowTitle ?? ""} selected={(context.HasSelectedText ? context.SelectedText!.Length : 0)} chars");
+        Logger.Debug($"[ContextCapturer] app={context.ActiveProcessName ?? "unknown"} title={context.ActiveWindowTitle ?? ""} url={context.BrowserUrl ?? ""} workspace={context.WorkspaceName ?? ""} selected={(context.HasSelectedText ? context.SelectedText!.Length : 0)} chars");
         return context;
     }
 
@@ -125,6 +131,159 @@ public static class WindowsContextCapturer
         {
             Logger.Debug($"[ContextCapturer] Failed to read process info: {ex.Message}");
         }
+    }
+
+    private static void PopulateEnrichedContext(IntPtr window, DictationContext context)
+    {
+        var processName = Path.GetFileNameWithoutExtension(context.ActiveProcessName ?? "");
+
+        if (IsChromiumBrowser(processName))
+        {
+            var url = TryReadBrowserUrl(window);
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                context.BrowserUrl = url;
+                context.BrowserHost = TryGetHost(url);
+            }
+        }
+
+        if (IsVsCode(processName))
+        {
+            context.WorkspaceName = TryExtractVsCodeWorkspace(context.ActiveWindowTitle);
+        }
+    }
+
+    private static bool IsChromiumBrowser(string processName) =>
+        processName.Equals("chrome", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("msedge", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsVsCode(string processName) =>
+        processName.Equals("Code", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("Code - Insiders", StringComparison.OrdinalIgnoreCase);
+
+    private static string? TryReadBrowserUrl(IntPtr window)
+    {
+        try
+        {
+            var automationType = Type.GetTypeFromProgID("UIAutomationClient.CUIAutomation");
+            if (automationType == null) return null;
+
+            dynamic? automation = Activator.CreateInstance(automationType);
+            if (automation == null) return null;
+
+            dynamic root = automation.ElementFromHandle(window);
+            if (root == null) return null;
+
+            dynamic condition = automation.CreatePropertyCondition(UiaControlTypePropertyId, UiaEditControlTypeId);
+            dynamic edits = root.FindAll(TreeScopeDescendants, condition);
+            int count = edits.Length;
+
+            for (var i = 0; i < count; i++)
+            {
+                dynamic edit = edits.GetElement(i);
+                var name = SafeAutomationString(() => Convert.ToString(edit.GetCurrentPropertyValue(UiaNamePropertyId)) ?? "");
+                var value = SafeAutomationString(() => Convert.ToString(edit.GetCurrentPropertyValue(UiaValueValuePropertyId)) ?? "");
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    value = name;
+                }
+
+                if (LooksLikeBrowserAddressBar(name, value) && TryNormalizeUrl(value, out var normalized))
+                {
+                    return normalized;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[ContextCapturer] Browser URL capture skipped: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private static string SafeAutomationString(Func<string> read)
+    {
+        try
+        {
+            return read() ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static bool LooksLikeBrowserAddressBar(string name, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var lowerName = name.ToLowerInvariant();
+        var namedLikeAddressBar =
+            lowerName.Contains("address", StringComparison.Ordinal) ||
+            lowerName.Contains("search", StringComparison.Ordinal) ||
+            lowerName.Contains("adresse", StringComparison.Ordinal) ||
+            lowerName.Contains("rechercher", StringComparison.Ordinal) ||
+            lowerName.Contains("web", StringComparison.Ordinal);
+
+        return namedLikeAddressBar || TryNormalizeUrl(value, out _);
+    }
+
+    private static bool TryNormalizeUrl(string value, out string normalized)
+    {
+        normalized = "";
+        value = value.Trim();
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (value.Contains(' ') && !value.Contains("://", StringComparison.Ordinal)) return false;
+
+        var candidate = value;
+        if (!candidate.Contains("://", StringComparison.Ordinal) &&
+            (candidate.Contains('.') || candidate.StartsWith("localhost", StringComparison.OrdinalIgnoreCase)))
+        {
+            candidate = "https://" + candidate;
+        }
+
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme is not ("http" or "https")) return false;
+        if (string.IsNullOrWhiteSpace(uri.Host)) return false;
+
+        normalized = uri.ToString();
+        return true;
+    }
+
+    private static string? TryGetHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        return uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+            ? uri.Host[4..]
+            : uri.Host;
+    }
+
+    private static string? TryExtractVsCodeWorkspace(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return null;
+
+        var cleaned = title.Trim();
+        foreach (var suffix in new[] { " - Visual Studio Code", " - Visual Studio Code - Insiders" })
+        {
+            if (cleaned.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[..^suffix.Length];
+                break;
+            }
+        }
+
+        var parts = cleaned
+            .Split(" - ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+
+        if (parts.Length >= 2)
+        {
+            return parts[^1];
+        }
+
+        return parts.Length == 1 ? parts[0] : null;
     }
 
     private static string? CaptureSelectedText(IntPtr targetWindow)

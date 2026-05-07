@@ -26,7 +26,7 @@ public class LocalWhisperProvider : ITranscriptionProvider
         return true;
     }
 
-    public async Task<string> TranscribeAsync(string audioFilePath)
+    public async Task<string> TranscribeAsync(string audioFilePath, string? prompt = null)
     {
         ValidateAudioFile(audioFilePath);
 

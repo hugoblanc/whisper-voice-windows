@@ -34,6 +34,7 @@ public class RecordingWindow : Form
     private readonly Label _timerLabel;
     private readonly ModeSelectorHud _modeSelector;
     private readonly Label _switchHintLabel;
+    private readonly Label _autoModeLabel;
     private readonly ProjectChipHud _projectChip;
     private readonly CapsuleHudButton _cancelButton;
     private readonly CapsuleHudButton _stopButton;
@@ -54,6 +55,7 @@ public class RecordingWindow : Form
     public event Action? CancelRequested;
     public event Action? StopRequested;
     public event Action? ModeCycleRequested;
+    public event Action? ProjectPickRequested;
 
     protected override bool ShowWithoutActivation => true;
 
@@ -132,7 +134,20 @@ public class RecordingWindow : Form
             AutoEllipsis = true
         };
 
+        _autoModeLabel = new Label
+        {
+            Text = "",
+            ForeColor = Color.FromArgb(170, 222, 240, 248),
+            BackColor = Color.Transparent,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleCenter,
+            UseCompatibleTextRendering = false,
+            AutoEllipsis = true,
+            Visible = false
+        };
+
         _projectChip = new ProjectChipHud();
+        _projectChip.Click += (_, _) => ProjectPickRequested?.Invoke();
 
         _cancelButton = new CapsuleHudButton("Cancel", CapsuleIcon.Cancel, isPrimary: false);
         _cancelButton.Click += (_, _) => CancelRequested?.Invoke();
@@ -147,6 +162,7 @@ public class RecordingWindow : Form
             _timerLabel,
             _modeSelector,
             _switchHintLabel,
+            _autoModeLabel,
             _projectChip,
             _cancelButton,
             _stopButton
@@ -227,6 +243,9 @@ public class RecordingWindow : Form
             S(24));
         SetFittedLabelFont(_switchHintLabel, "Segoe UI", FontStyle.Bold, S(20), S(12));
 
+        _autoModeLabel.SetBounds(padding, _modeSelector.Bottom + S(6), width - padding * 2, S(20));
+        SetFittedLabelFont(_autoModeLabel, "Segoe UI", FontStyle.Regular, S(13), S(10));
+
         var buttonHeight = S(62);
         var buttonWidth = Math.Clamp((width - S(72)) / 3, S(128), S(190));
         var buttonY = height - S(82);
@@ -234,7 +253,8 @@ public class RecordingWindow : Form
         _stopButton.SetBounds(width - S(36) - buttonWidth, buttonY, buttonWidth, buttonHeight);
 
         var chipHeight = S(58);
-        var chipY = Math.Max(_modeSelector.Bottom + S(18), buttonY - S(70));
+        var chipTop = _autoModeLabel.Visible ? _autoModeLabel.Bottom + S(8) : _modeSelector.Bottom + S(18);
+        var chipY = Math.Max(chipTop, buttonY - S(70));
         _projectChip.SetBounds(padding, chipY, width - padding * 2, chipHeight);
 
         Region?.Dispose();
@@ -436,6 +456,34 @@ public class RecordingWindow : Form
         }
 
         _modeSelector.ModeName = modeName;
+    }
+
+    public void SetAutoModeReason(string? reason)
+    {
+        if (InvokeRequired)
+        {
+            Invoke(() => SetAutoModeReason(reason));
+            return;
+        }
+
+        _autoModeLabel.Text = reason ?? "";
+        _autoModeLabel.Visible = !string.IsNullOrWhiteSpace(reason);
+        LayoutControls();
+        Invalidate();
+    }
+
+    public void SetProject(string? projectName, Color? projectColor = null, bool predicted = false)
+    {
+        if (InvokeRequired)
+        {
+            Invoke(() => SetProject(projectName, projectColor, predicted));
+            return;
+        }
+
+        _projectChip.ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName;
+        _projectChip.ProjectColor = projectColor ?? Color.FromArgb(123, 192, 214);
+        _projectChip.Predicted = predicted;
+        _projectChip.Invalidate();
     }
 
     public void SetState(AppState state)
@@ -692,6 +740,11 @@ public class RecordingWindow : Form
 
     private sealed class ProjectChipHud : Control
     {
+        public string? ProjectName { get; set; }
+        public Color ProjectColor { get; set; } = Color.FromArgb(123, 192, 214);
+        public bool Predicted { get; set; }
+        private bool _hovering;
+
         public ProjectChipHud()
         {
             SetStyle(
@@ -702,6 +755,21 @@ public class RecordingWindow : Form
                 ControlStyles.SupportsTransparentBackColor,
                 true);
             BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hovering = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hovering = false;
+            Invalidate();
+            base.OnMouseLeave(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -713,12 +781,16 @@ public class RecordingWindow : Form
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             using (var path = RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Math.Max(10, Height / 5)))
-            using (var fill = new SolidBrush(Color.FromArgb(45, 255, 255, 255)))
+            using (var fill = new SolidBrush(Color.FromArgb(_hovering ? 64 : 45, 255, 255, 255)))
             {
                 g.FillPath(fill, path);
             }
 
-            var fullText = "in: (untagged)   click to pick";
+            var projectText = string.IsNullOrWhiteSpace(ProjectName) ? "(untagged)" : ProjectName!;
+            var actionText = string.IsNullOrWhiteSpace(ProjectName)
+                ? "click to pick"
+                : Predicted ? "predicted - click to change" : "click to change";
+            var fullText = $"in: {projectText}   {actionText}";
             var fontSize = FitTextPixelSize(g, fullText, "Segoe UI", FontStyle.Bold, new SizeF(Width - 40, Height - 6), Math.Max(17, Height * 0.46f), 12);
             using var font = new Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
             using var muted = new SolidBrush(Color.FromArgb(180, 232, 246, 255));
@@ -728,8 +800,18 @@ public class RecordingWindow : Form
 
             g.DrawString("in: ", font, muted, x, y);
             x += g.MeasureString("in: ", font).Width;
-            g.DrawString("(untagged)", font, primary, x, y);
-            x += g.MeasureString("(untagged)   ", font).Width;
+
+            if (!string.IsNullOrWhiteSpace(ProjectName))
+            {
+                var dotSize = Math.Max(8, (int)(fontSize * 0.58f));
+                var dotRect = new RectangleF(x, Height / 2f - dotSize / 2f, dotSize, dotSize);
+                using var dotBrush = new SolidBrush(ProjectColor);
+                g.FillEllipse(dotBrush, dotRect);
+                x += dotSize + 8;
+            }
+
+            g.DrawString(projectText, font, primary, x, y);
+            x += g.MeasureString(projectText + "   ", font).Width;
             var remaining = Width - x - 18;
             if (remaining > g.MeasureString("pick", font).Width)
             {
@@ -740,7 +822,7 @@ public class RecordingWindow : Form
                     Trimming = StringTrimming.EllipsisCharacter,
                     FormatFlags = StringFormatFlags.NoWrap
                 };
-                g.DrawString("click to pick", font, muted, new RectangleF(x, 0, remaining, Height), format);
+                g.DrawString(actionText, font, muted, new RectangleF(x, 0, remaining, Height), format);
             }
         }
     }

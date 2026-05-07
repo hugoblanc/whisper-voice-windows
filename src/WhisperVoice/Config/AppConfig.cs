@@ -18,11 +18,20 @@ public class AppConfig
     public uint ShortcutModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT (Ctrl+Shift)
     public uint ShortcutKeyCode { get; set; } = 0x20;     // VK_SPACE
     public uint PushToTalkKeyCode { get; set; } = 0x72;   // VK_F3
+    public List<string> CustomVocabulary { get; set; } = new();
     public List<CustomModeConfig> CustomModes { get; set; } = new();
     public List<string> DisabledBuiltInModeIds { get; set; } = new();
     public AudioCaptureMode AudioCaptureMode { get; set; } = AudioCaptureMode.Instant;
+    public string ProcessingModel { get; set; } = "gpt-5.4-nano";
     public bool AutoModeEnabled { get; set; } = true;
+    public bool AutoModeFallbackToLastUsed { get; set; } = false;
     public List<AutoModeRuleConfig> AutoModeRules { get; set; } = AutoModeRuleConfig.CreateDefaults();
+    public List<PostActionConfig> PostActions { get; set; } = PostActionConfig.CreateDefaults();
+    public string ActivePostActionId { get; set; } = PostActionConfig.BuiltInPasteId;
+    public bool AutoPostActionEnabled { get; set; } = false;
+    public List<AutoPostActionRuleConfig> AutoPostActionRules { get; set; } = new();
+    public bool ProjectTaggingEnabled { get; set; } = true;
+    public string LastUsedProjectId { get; set; } = "";
 
     /// <summary>
     /// Get the API key for the specified provider, falling back to main ApiKey for backward compatibility
@@ -110,9 +119,21 @@ public class AppConfig
     private void EnsureDefaults()
     {
         ProviderApiKeys ??= new Dictionary<string, string>();
+        CustomVocabulary ??= new List<string>();
         CustomModes ??= new List<CustomModeConfig>();
         DisabledBuiltInModeIds ??= new List<string>();
         AutoModeRules ??= AutoModeRuleConfig.CreateDefaults();
+        PostActions = PostActionConfig.MergeWithBuiltIns(PostActions);
+        ActivePostActionId = PostActionConfig.NormalizeActiveId(PostActions, ActivePostActionId);
+        AutoPostActionRules ??= new List<AutoPostActionRuleConfig>();
+        ProcessingModel = string.IsNullOrWhiteSpace(ProcessingModel)
+            ? "gpt-5.4-nano"
+            : ProcessingModel.Trim();
+        CustomVocabulary = CustomVocabulary
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Select(term => term.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (!Enum.IsDefined(AudioCaptureMode))
         {
             AudioCaptureMode = AudioCaptureMode.Instant;
@@ -130,6 +151,13 @@ public class AppConfig
         {
             rule.EnsureId(existingRuleIds);
             existingRuleIds.Add(rule.Id);
+        }
+
+        var existingActionRuleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in AutoPostActionRules)
+        {
+            rule.EnsureId(existingActionRuleIds);
+            existingActionRuleIds.Add(rule.Id);
         }
     }
 
@@ -169,6 +197,89 @@ public class AppConfig
         0x7B => "F12",
         _ => $"Key{keyCode:X2}"
     };
+}
+
+public class AutoPostActionRuleConfig
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public string ProcessName { get; set; } = "";
+    public string WindowTitleContains { get; set; } = "";
+    public string ActionId { get; set; } = "";
+
+    [JsonIgnore]
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(ActionId) &&
+        (!string.IsNullOrWhiteSpace(ProcessName) || !string.IsNullOrWhiteSpace(WindowTitleContains));
+
+    [JsonIgnore]
+    public int Specificity =>
+        (string.IsNullOrWhiteSpace(ProcessName) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(WindowTitleContains) ? 0 : 1);
+
+    public AutoPostActionRuleConfig Clone() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Enabled = Enabled,
+        ProcessName = ProcessName,
+        WindowTitleContains = WindowTitleContains,
+        ActionId = ActionId
+    };
+
+    public void EnsureId(ISet<string> existingIds)
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = CreateUniqueId(Name, ProcessName, WindowTitleContains, existingIds);
+        }
+    }
+
+    private static string CreateUniqueId(string name, string processName, string title, ISet<string> existingIds)
+    {
+        var seed = string.IsNullOrWhiteSpace(name)
+            ? $"{processName}_{title}_action"
+            : name;
+        var baseId = "auto_action_" + Slugify(seed);
+        if (baseId == "auto_action_")
+        {
+            baseId = "auto_action_rule";
+        }
+
+        var candidate = baseId;
+        var suffix = 2;
+        while (existingIds.Contains(candidate))
+        {
+            candidate = $"{baseId}_{suffix}";
+            suffix++;
+        }
+
+        return candidate;
+    }
+
+    private static string Slugify(string value)
+    {
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch =>
+            {
+                if (char.IsLetterOrDigit(ch)) return ch;
+                if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_' || ch == '>') return '_';
+                return '\0';
+            })
+            .Where(ch => ch != '\0')
+            .ToArray();
+
+        var slug = new string(chars);
+        while (slug.Contains("__", StringComparison.Ordinal))
+        {
+            slug = slug.Replace("__", "_", StringComparison.Ordinal);
+        }
+
+        return slug.Trim('_');
+    }
 }
 
 public class AutoModeRuleConfig

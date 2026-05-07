@@ -34,6 +34,9 @@ public class WhisperVoiceApp : Form
     private IntPtr _pasteTargetWindow = IntPtr.Zero;
     private DictationContext? _recordingContext;
     private RecordingJournalSession? _recordingJournal;
+    private ProjectConfig? _recordingProject;
+    private bool _recordingProjectPredicted;
+    private string? _pendingAutoModeReason;
     private DateTime? _recordingStartedAt;
     private bool _isStartingRecorder;
     private bool _stopRequestedAfterRecorderStart;
@@ -68,10 +71,13 @@ public class WhisperVoiceApp : Form
             config.GetToggleShortcutDescription(),
             config.GetPushToTalkKeyDescription(),
             _modeManager.CurrentMode.Name,
-            _modeManager.HasAIModesAvailable
+            _modeManager.HasAIModesAvailable,
+            config.PostActions,
+            config.ActivePostActionId
         );
         _trayIcon.QuitRequested += () => Application.Exit();
         _trayIcon.PreferencesRequested += ShowPreferences;
+        _trayIcon.PostActionSelected += OnPostActionSelected;
 
         _globalHotkey = new GlobalHotkey(Handle);
         _keyboardHook = new KeyboardHook();
@@ -263,6 +269,8 @@ public class WhisperVoiceApp : Form
             if (_state == AppState.Recording)
             {
                 var newMode = _modeManager.NextMode();
+                _pendingAutoModeReason = null;
+                _recordingWindow?.SetAutoModeReason(null);
                 Logger.Info($"Mode switched to: {newMode.Name}");
             }
         });
@@ -289,6 +297,9 @@ public class WhisperVoiceApp : Form
         _isStartingRecorder = false;
         _stopRequestedAfterRecorderStart = false;
         _cancelRequestedAfterRecorderStart = false;
+        _pendingAutoModeReason = null;
+        _recordingProject = null;
+        _recordingProjectPredicted = false;
 
         try
         {
@@ -308,6 +319,7 @@ public class WhisperVoiceApp : Form
                 throw;
             }
 
+            ApplyProjectPrediction(_recordingContext, journal);
             ApplyAutoMode(_recordingContext, journal);
 
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
@@ -380,6 +392,8 @@ public class WhisperVoiceApp : Form
             _recorder.AudioLevelChanged -= OnAudioLevelChanged;
             _pasteTargetWindow = IntPtr.Zero;
             _recordingContext = null;
+            _recordingProject = null;
+            _recordingProjectPredicted = false;
             _recordingStartedAt = null;
             CloseRecordingWindow();
             SetState(AppState.Idle);
@@ -390,17 +404,57 @@ public class WhisperVoiceApp : Form
         }
     }
 
+    private void ApplyProjectPrediction(DictationContext? context, RecordingJournalSession journal)
+    {
+        if (context == null || !_config.ProjectTaggingEnabled) return;
+
+        var project = ProjectStore.PredictProject(context, _config);
+        _recordingProject = project;
+        _recordingProjectPredicted = project != null;
+        ApplyProjectToContext(context, project);
+
+        if (project != null)
+        {
+            var detail = $"project={project.Name}; {context.ContextSummary}; title={context.ActiveWindowTitle ?? ""}";
+            journal.AddEvent("project_prediction", "ok", detail);
+            Logger.Info($"Project predicted: {detail}");
+        }
+        else
+        {
+            journal.AddEvent("project_prediction", "none", context.ContextSummary);
+        }
+    }
+
+    private static void ApplyProjectToContext(DictationContext context, ProjectConfig? project)
+    {
+        context.ProjectId = project?.Id ?? "";
+        context.ProjectName = project?.Name ?? "";
+    }
+
     private void ApplyAutoMode(DictationContext? context, RecordingJournalSession journal)
     {
         if (context == null) return;
 
         var mode = _modeManager.ResolveAutoMode(context, out var matchedRule);
-        if (mode == null || matchedRule == null) return;
+        if (mode == null || matchedRule == null)
+        {
+            if (_config.AutoModeEnabled && !_config.AutoModeFallbackToLastUsed)
+            {
+                _modeManager.SetMode(AIMode.Brut.Id);
+                journal.SetMode(_modeManager.CurrentMode.Name);
+                _pendingAutoModeReason = "auto: Brut (default)";
+                journal.AddEvent("auto_mode", "reset", "no matching rule; reset to Brut");
+                Logger.Info("Auto mode: no matching rule; reset to Brut");
+            }
+
+            return;
+        }
 
         _modeManager.SetMode(mode.Id);
         journal.SetMode(mode.Name);
 
         var detail = $"rule={matchedRule.Name}; mode={mode.Name}; app={context.ActiveProcessName ?? "unknown"}; title={context.ActiveWindowTitle ?? ""}";
+        _pendingAutoModeReason = $"auto: {mode.Name} ({matchedRule.Name})";
         journal.AddEvent("auto_mode", "ok", detail);
         Logger.Info($"Auto mode matched: {detail}");
     }
@@ -412,11 +466,68 @@ public class WhisperVoiceApp : Form
 
         _recordingWindow = new RecordingWindow(_pasteTargetWindow);
         _recordingWindow.SetMode(_modeManager.CurrentMode.Name);
+        _recordingWindow.SetAutoModeReason(_pendingAutoModeReason);
+        _recordingWindow.SetProject(
+            _recordingProject?.Name,
+            _recordingProject == null ? null : ColorFromProject(_recordingProject),
+            _recordingProjectPredicted);
         _recordingWindow.CancelRequested += OnRecordingCancelled;
         _recordingWindow.StopRequested += StopRecordingAndTranscribe;
         _recordingWindow.ModeCycleRequested += CycleModeDuringRecording;
+        _recordingWindow.ProjectPickRequested += PickProjectForCurrentRecording;
         _recordingWindow.FormClosed += (_, _) => _recordingWindow = null;
         _recordingWindow.Show();
+    }
+
+    private void PickProjectForCurrentRecording()
+    {
+        if (_state != AppState.Recording || _recordingWindow == null) return;
+
+        using var dialog = new ProjectPickerDialog(_recordingProject);
+        dialog.TopMost = true;
+
+        var wasTopMost = _recordingWindow.TopMost;
+        _recordingWindow.TopMost = false;
+
+        DialogResult result;
+        try
+        {
+            result = dialog.ShowDialog(_recordingWindow);
+        }
+        finally
+        {
+            if (_recordingWindow != null && !_recordingWindow.IsDisposed)
+            {
+                _recordingWindow.TopMost = wasTopMost;
+                _recordingWindow.BringToFront();
+            }
+        }
+
+        if (result != DialogResult.OK) return;
+
+        _recordingProject = dialog.SelectedProject;
+        _recordingProjectPredicted = false;
+
+        if (_recordingContext != null)
+        {
+            ApplyProjectToContext(_recordingContext, _recordingProject);
+        }
+
+        if (_recordingProject != null)
+        {
+            _config.LastUsedProjectId = _recordingProject.Id;
+            _config.Save();
+            _recordingJournal?.AddEvent("project_selected", "ok", $"project={_recordingProject.Name}");
+        }
+        else
+        {
+            _recordingJournal?.AddEvent("project_selected", "none", "untagged");
+        }
+
+        _recordingWindow.SetProject(
+            _recordingProject?.Name,
+            _recordingProject == null ? null : ColorFromProject(_recordingProject),
+            predicted: false);
     }
 
     private void CycleModeDuringRecording()
@@ -424,6 +535,8 @@ public class WhisperVoiceApp : Form
         if (_state != AppState.Recording) return;
 
         var newMode = _modeManager.NextMode();
+        _pendingAutoModeReason = null;
+        _recordingWindow?.SetAutoModeReason(null);
         Logger.Info($"Mode switched from recording window to: {newMode.Name}");
     }
 
@@ -571,10 +684,16 @@ public class WhisperVoiceApp : Form
 
             // Step 1: Transcribe audio
             Logger.Info($"Sending audio to {_transcriptionProvider.DisplayName}...");
+            var vocabularyPrompt = BuildVocabularyPrompt(_config.CustomVocabulary);
+            if (!string.IsNullOrWhiteSpace(vocabularyPrompt))
+            {
+                journal?.AddEvent("custom_vocabulary", "ok", $"{_config.CustomVocabulary.Count} terms");
+            }
+
             var text = journal != null
-                ? await journal.TrackAsync("transcribe_audio", () => _transcriptionProvider.TranscribeAsync(audioPath),
+                ? await journal.TrackAsync("transcribe_audio", () => _transcriptionProvider.TranscribeAsync(audioPath, vocabularyPrompt),
                     result => $"{result.Length} chars")
-                : await _transcriptionProvider.TranscribeAsync(audioPath);
+                : await _transcriptionProvider.TranscribeAsync(audioPath, vocabularyPrompt);
 
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -587,6 +706,7 @@ public class WhisperVoiceApp : Form
             Logger.Info($"Transcription received: {text.Length} chars");
             Logger.Debug($"Transcription text: {text}");
             journal?.SetRawTextChars(text.Length);
+            var rawText = text;
 
             // Step 2: Apply AI processing if mode requires it
             if (currentMode.RequiresProcessing)
@@ -598,8 +718,14 @@ public class WhisperVoiceApp : Form
                     try
                     {
                         processingStep = journal?.StartStep("ai_processing");
-                        text = await _textProcessor.ProcessAsync(text, currentMode, apiKey, recordingContext);
-                        processingStep?.Complete("ok", $"{text.Length} chars");
+                        text = await _textProcessor.ProcessAsync(
+                            text,
+                            currentMode,
+                            apiKey,
+                            recordingContext,
+                            _config.ProcessingModel,
+                            _config.CustomVocabulary);
+                        processingStep?.Complete("ok", $"{text.Length} chars; model={_config.ProcessingModel}");
                         Logger.Info($"AI processing complete: {text.Length} chars");
                     }
                     catch (Exception ex)
@@ -622,7 +748,7 @@ public class WhisperVoiceApp : Form
 
             journal?.SetFinalTextChars(text.Length);
 
-            // Step 3: Paste result
+            // Step 3: Run post-transcription action
             if (journal != null)
             {
                 await journal.TrackAsync("close_recording_window", async () =>
@@ -637,25 +763,49 @@ public class WhisperVoiceApp : Form
                 await Task.Delay(75);
             }
 
-            var pasted = journal != null
-                ? journal.Track("paste_result", () => ClipboardPaste.Paste(text, pasteTargetWindow),
-                    result => result ? "paste sent" : "clipboard only")
-                : ClipboardPaste.Paste(text, pasteTargetWindow);
-            journal?.SetPasted(pasted);
-            if (!pasted)
+            var action = PostActionRuleResolver.Resolve(_config, recordingContext, out var matchedActionRule);
+            if (matchedActionRule != null)
             {
-                journal?.AddEvent("paste_warning", "warning", "automatic paste may have failed");
-                _trayIcon.ShowNotification("Paste Warning", "Transcription copied to clipboard, but automatic paste may have failed.", ToolTipIcon.Warning);
+                var detail = $"rule={matchedActionRule.Name}; action={action.Label}; app={recordingContext?.ActiveProcessName ?? "unknown"}; title={recordingContext?.ActiveWindowTitle ?? ""}";
+                journal?.AddEvent("auto_post_action", "ok", detail);
+                Logger.Info($"Auto post-action matched: {detail}");
+            }
+
+            var actionResult = journal != null
+                ? await journal.TrackAsync("post_action",
+                    () => PostActionExecutor.ExecuteAsync(
+                        action,
+                        text,
+                        rawText,
+                        recordingContext,
+                        _config.Provider,
+                        currentMode.Name,
+                        pasteTargetWindow),
+                    result => $"{action.Label}: {result.Detail}")
+                : await PostActionExecutor.ExecuteAsync(
+                    action,
+                    text,
+                    rawText,
+                    recordingContext,
+                    _config.Provider,
+                    currentMode.Name,
+                    pasteTargetWindow);
+
+            journal?.SetPasted(actionResult.Pasted);
+            if (!actionResult.Success)
+            {
+                journal?.AddEvent("post_action_warning", "warning", actionResult.Detail);
+                _trayIcon.ShowNotification("Post-action Warning", $"'{action.Label}' may have failed: {actionResult.Detail}", ToolTipIcon.Warning);
             }
 
             // Step 4: Save to history
             if (journal != null)
             {
-                journal.Track("save_history", () => TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name));
+                journal.Track("save_history", () => TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name, recordingContext, action.Label));
             }
             else
             {
-                TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name);
+                TranscriptionHistory.AddEntry(text, _config.Provider, currentMode.Name, recordingContext, action.Label);
             }
             Logger.Debug("Transcription saved to history");
         }
@@ -673,6 +823,8 @@ public class WhisperVoiceApp : Form
 
             _pasteTargetWindow = IntPtr.Zero;
             _recordingContext = null;
+            _recordingProject = null;
+            _recordingProjectPredicted = false;
             _recordingStartedAt = null;
             SetState(AppState.Idle);
             journal?.Finish(finalStatus, finalError);
@@ -695,6 +847,19 @@ public class WhisperVoiceApp : Form
             step?.Fail(ex);
             Logger.Warn($"Recording cleanup failed: {ex.Message}");
         }
+    }
+
+    private static string? BuildVocabularyPrompt(IReadOnlyList<string>? vocabulary)
+    {
+        if (vocabulary == null || vocabulary.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(", ", vocabulary
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Select(term => term.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase));
     }
 
     private void RunOnUiThread(Action action)
@@ -779,6 +944,18 @@ public class WhisperVoiceApp : Form
         window.TopMost = false;
     }
 
+    private static Color ColorFromProject(ProjectConfig project)
+    {
+        try
+        {
+            return ColorTranslator.FromHtml(project.Color);
+        }
+        catch
+        {
+            return Color.FromArgb(123, 192, 214);
+        }
+    }
+
     private void OnSettingsSaved(AppConfig newConfig)
     {
         var providerChanged = newConfig.Provider != _config.Provider ||
@@ -811,8 +988,17 @@ public class WhisperVoiceApp : Form
             _config.GetToggleShortcutDescription(),
             _config.GetPushToTalkKeyDescription()
         );
+        _trayIcon.UpdatePostActions(_config.PostActions, _config.ActivePostActionId);
 
         _trayIcon.ShowNotification("Settings Saved", "Your preferences have been updated.");
+    }
+
+    private void OnPostActionSelected(string actionId)
+    {
+        _config.ActivePostActionId = PostActionConfig.NormalizeActiveId(_config.PostActions, actionId);
+        _config.Save();
+        _trayIcon.UpdatePostActions(_config.PostActions, _config.ActivePostActionId);
+        Logger.Info($"Post-action selected from tray: {_config.ActivePostActionId}");
     }
 
     private void ReloadProvider()
