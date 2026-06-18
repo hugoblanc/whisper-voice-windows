@@ -26,9 +26,9 @@ internal static class Program
         // Initialize logging first
         Logger.Initialize();
 
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
 
         // Log audio devices for debugging
         Logger.LogAudioDevices();

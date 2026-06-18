@@ -8,16 +8,20 @@ namespace WhisperVoice.Config;
 
 public class PreferencesWindow : Form
 {
-    private static readonly Color GlassTopColor = Color.FromArgb(117, 190, 211);
-    private static readonly Color GlassBottomColor = Color.FromArgb(95, 143, 179);
-    private static readonly Color SurfaceColor = Color.FromArgb(226, 246, 252);
-    private static readonly Color SurfaceAltColor = Color.FromArgb(211, 237, 246);
-    private static readonly Color FieldColor = Color.FromArgb(242, 251, 254);
-    private static readonly Color PrimaryTextColor = Color.FromArgb(35, 58, 74);
-    private static readonly Color MutedTextColor = Color.FromArgb(87, 119, 135);
-    private static readonly Color AccentColor = Color.FromArgb(255, 92, 53);
-    private static readonly Color AccentHoverColor = Color.FromArgb(255, 116, 74);
-    private static readonly Color BorderColor = Color.FromArgb(148, 202, 219);
+    private static readonly Color SurfaceColor = Color.FromArgb(255, 255, 255);
+    private static readonly Color SurfaceAltColor = Color.FromArgb(247, 247, 245);
+    private static readonly Color HoverColor = Color.FromArgb(247, 247, 245);
+    private static readonly Color FieldColor = Color.FromArgb(255, 255, 255);
+    private static readonly Color PrimaryTextColor = Color.FromArgb(47, 52, 55);
+    private static readonly Color MutedTextColor = Color.FromArgb(138, 138, 133);
+    private static readonly Color AccentColor = Color.FromArgb(35, 131, 226);
+    private static readonly Color AccentHoverColor = Color.FromArgb(24, 102, 181);
+    private static readonly Color PrimaryButtonColor = Color.FromArgb(47, 52, 55);
+    private static readonly Color PrimaryButtonHoverColor = Color.FromArgb(17, 19, 21);
+    private static readonly Color BorderColor = Color.FromArgb(236, 235, 234);
+    private static readonly Color BorderSoftColor = Color.FromArgb(243, 242, 241);
+    private const int SidebarWidth = 214;
+    private const int ContentMaxWidth = 760;
 
     private FlowLayoutPanel _navPanel = null!;
     private Panel _contentPanel = null!;
@@ -25,19 +29,19 @@ public class PreferencesWindow : Form
     private string _activeSection = "General";
 
     // General tab
-    private HudDropdown _providerCombo = null!;
+    private ComboBox _providerCombo = null!;
     private TextBox _apiKeyTextBox = null!;
     private LinkLabel _apiKeyLink = null!;
     private Button _testConnectionButton = null!;
     private Label _connectionStatusLabel = null!;
-    private HudDropdown _audioCaptureModeCombo = null!;
+    private ComboBox _audioCaptureModeCombo = null!;
     private Label _audioCaptureModeDescriptionLabel = null!;
-    private HudDropdown _processingModelCombo = null!;
+    private ComboBox _processingModelCombo = null!;
     private TextBox _customVocabularyTextBox = null!;
 
     // Shortcuts tab
-    private HudDropdown _shortcutCombo = null!;
-    private HudDropdown _pttCombo = null!;
+    private ComboBox _shortcutCombo = null!;
+    private ComboBox _pttCombo = null!;
 
     // Modes tab
     private ListBox _builtInModesList = null!;
@@ -70,9 +74,15 @@ public class PreferencesWindow : Form
     // Projects tab
     private CheckBox _projectTaggingEnabledCheckBox = null!;
     private ListBox _projectsList = null!;
+    private ComboBox _projectDefaultModeCombo = null!;
+    private TextBox _projectContextNotesTextBox = null!;
+    private ListBox _projectDocumentsList = null!;
     private Button _renameProjectButton = null!;
     private Button _archiveProjectButton = null!;
+    private Button _importProjectFileButton = null!;
+    private Button _removeProjectDocumentButton = null!;
     private readonly List<ProjectConfig> _projects = new();
+    private bool _loadingProjectDetails;
 
     // Logs tab
     private TextBox _logTextBox = null!;
@@ -86,7 +96,7 @@ public class PreferencesWindow : Form
     // Footer
     private Button _saveButton = null!;
     private Button _cancelButton = null!;
-    private FlowLayoutPanel _footerPanel = null!;
+    private FooterBarPanel _footerPanel = null!;
 
     private readonly AppConfig _originalConfig;
     private bool _connectionSuccessful;
@@ -104,36 +114,47 @@ public class PreferencesWindow : Form
     private void InitializeComponents()
     {
         Text = "Whisper Voice - Preferences";
-        AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(960, 720);
-        MinimumSize = new Size(900, 640);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        ClientSize = new Size(1040, 720);
+        MinimumSize = new Size(920, 640);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10F);
-        BackColor = GlassBottomColor;
+        BackColor = SurfaceColor;
         DoubleBuffered = true;
+
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            BackColor = SurfaceColor,
+            Padding = new Padding(20, 18, 20, 0)
+        };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SidebarWidth));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 86));
 
         _navPanel = new FlowLayoutPanel
         {
-            Location = new Point(24, 18),
-            Size = new Size(ClientSize.Width - 48, 48),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-            BackColor = GlassTopColor,
-            FlowDirection = FlowDirection.LeftToRight,
+            Dock = DockStyle.Fill,
+            BackColor = SurfaceColor,
+            FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
-            Padding = Padding.Empty,
-            Margin = Padding.Empty
+            AutoScroll = true,
+            Padding = new Padding(0, 4, 16, 0),
+            Margin = new Padding(0, 0, 18, 0)
         };
 
         _contentPanel = new Panel
         {
-            Location = new Point(24, 76),
-            Size = new Size(ClientSize.Width - 48, ClientSize.Height - 148),
-            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+            Dock = DockStyle.Fill,
             BackColor = SurfaceColor,
-            Padding = new Padding(16)
+            Padding = new Padding(0, 0, 0, 16),
+            Margin = Padding.Empty
         };
 
         // Create tabs
@@ -155,20 +176,20 @@ public class PreferencesWindow : Form
         AddPreferenceSection("Journal", journalTab);
         AddPreferenceSection("Logs", logsTab);
 
-        _footerPanel = new FlowLayoutPanel
+        _footerPanel = new FooterBarPanel
         {
-            Height = 60,
-            Dock = DockStyle.Bottom,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false,
-            Padding = new Padding(0, 10, 14, 10),
-            BackColor = GlassBottomColor
+            Dock = DockStyle.Fill,
+            Padding = new Padding(0, 12, 20, 12),
+            BackColor = SurfaceColor,
+            Margin = Padding.Empty
         };
 
         _saveButton = new Button
         {
             Text = "Save",
-            Size = new Size(118, 40),
+            Size = new Size(124, 46),
+            MinimumSize = new Size(124, 46),
+            Margin = Padding.Empty,
             FlatStyle = FlatStyle.Flat
         };
         _saveButton.Click += SaveButton_Click;
@@ -176,27 +197,31 @@ public class PreferencesWindow : Form
         _cancelButton = new Button
         {
             Text = "Cancel",
-            Size = new Size(118, 40),
-            Margin = new Padding(8, 0, 0, 0),
+            Size = new Size(124, 46),
+            MinimumSize = new Size(124, 46),
+            Margin = Padding.Empty,
             FlatStyle = FlatStyle.Flat
         };
         _cancelButton.Click += (_, _) => Close();
 
         _footerPanel.Controls.Add(_cancelButton);
         _footerPanel.Controls.Add(_saveButton);
+        _footerPanel.Resize += (_, _) => LayoutFooterButtons();
 
-        Controls.Add(_navPanel);
-        Controls.Add(_contentPanel);
-        Controls.Add(_footerPanel);
+        shell.Controls.Add(_navPanel, 0, 0);
+        shell.Controls.Add(_contentPanel, 1, 0);
+        shell.Controls.Add(_footerPanel, 0, 1);
+        shell.SetColumnSpan(_footerPanel, 2);
+        Controls.Add(shell);
 
         ApplyPreferencesTheme();
+        LayoutFooterButtons();
         SelectPreferenceSection("General");
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        using var brush = new LinearGradientBrush(ClientRectangle, GlassTopColor, GlassBottomColor, LinearGradientMode.Vertical);
-        e.Graphics.FillRectangle(brush, ClientRectangle);
+        e.Graphics.Clear(SurfaceColor);
     }
 
     private void AddPreferenceSection(string title, Panel page)
@@ -208,14 +233,9 @@ public class PreferencesWindow : Form
 
         var navButton = new PreferenceNavButton(title)
         {
-            Width = title switch
-            {
-                "Auto Mode" => 128,
-                "Shortcuts" => 118,
-                _ => 108
-            },
-            Height = 42,
-            Margin = new Padding(0, 0, 6, 0)
+            Width = SidebarWidth - 34,
+            Height = 36,
+            Margin = new Padding(0, 0, 0, 4)
         };
         navButton.Click += (_, _) => SelectPreferenceSection(title);
 
@@ -238,11 +258,17 @@ public class PreferencesWindow : Form
                 section.Page.BringToFront();
             }
         }
+
+        if (string.Equals(title, "Projects", StringComparison.OrdinalIgnoreCase))
+        {
+            LoadSelectedProjectDetails();
+        }
     }
 
     private void ApplyPreferencesTheme()
     {
         _contentPanel.BackColor = SurfaceColor;
+        _navPanel.BackColor = SurfaceColor;
 
         foreach (var section in _sections)
         {
@@ -258,6 +284,22 @@ public class PreferencesWindow : Form
 
         StyleButton(_saveButton, primary: true);
         StyleButton(_cancelButton, primary: false);
+        LayoutFooterButtons();
+    }
+
+    private void LayoutFooterButtons()
+    {
+        if (_footerPanel == null || _saveButton == null || _cancelButton == null) return;
+
+        const int gap = 10;
+        var buttonHeight = Math.Max(_saveButton.Height, _cancelButton.Height);
+        var y = Math.Max(
+            _footerPanel.Padding.Top,
+            (_footerPanel.ClientSize.Height - buttonHeight) / 2);
+        var right = _footerPanel.ClientSize.Width - _footerPanel.Padding.Right;
+
+        _saveButton.Location = new Point(right - _saveButton.Width, y);
+        _cancelButton.Location = new Point(_saveButton.Left - gap - _cancelButton.Width, y);
     }
 
     private void ApplyControlTheme(Control control)
@@ -296,7 +338,7 @@ public class PreferencesWindow : Form
             case TextBox textBox:
                 StyleTextBox(textBox);
                 break;
-            case HudDropdown dropdown:
+            case ComboBox dropdown:
                 StyleDropdown(dropdown);
                 break;
             case ListBox listBox:
@@ -308,7 +350,7 @@ public class PreferencesWindow : Form
             case CheckBox checkBox:
                 checkBox.BackColor = SurfaceColor;
                 checkBox.ForeColor = PrimaryTextColor;
-                checkBox.Font = new Font("Segoe UI", 10f);
+                checkBox.Font = new Font("Segoe UI", 9.6f);
                 checkBox.FlatStyle = FlatStyle.Flat;
                 break;
         }
@@ -324,23 +366,26 @@ public class PreferencesWindow : Form
         textBox.BackColor = FieldColor;
         textBox.ForeColor = PrimaryTextColor;
         textBox.BorderStyle = BorderStyle.FixedSingle;
-        textBox.Font = new Font("Segoe UI", textBox.Multiline ? 10.5f : 10f);
-        if (!textBox.Multiline && textBox.Height < 32)
+        var isMonospace = string.Equals(textBox.Font.FontFamily.Name, "Consolas", StringComparison.OrdinalIgnoreCase);
+        if (!isMonospace)
+        {
+            textBox.Font = new Font("Segoe UI", textBox.Multiline ? 9.8f : 9.6f);
+        }
+        if (!textBox.Multiline && textBox.Height < 34)
         {
             textBox.AutoSize = false;
-            textBox.Height = 32;
+            textBox.Height = 34;
         }
     }
 
-    private static void StyleDropdown(HudDropdown dropdown)
+    private static void StyleDropdown(ComboBox dropdown)
     {
         dropdown.BackColor = FieldColor;
         dropdown.ForeColor = PrimaryTextColor;
-        dropdown.Font = new Font("Segoe UI", 10f);
-        if (dropdown.Height < 38)
-        {
-            dropdown.Height = 38;
-        }
+        dropdown.Font = new Font("Segoe UI", 9.6f);
+        dropdown.FlatStyle = FlatStyle.Standard;
+        dropdown.DropDownStyle = ComboBoxStyle.DropDownList;
+        dropdown.IntegralHeight = false;
     }
 
     private static void StyleListBox(ListBox listBox)
@@ -348,8 +393,8 @@ public class PreferencesWindow : Form
         listBox.BackColor = FieldColor;
         listBox.ForeColor = PrimaryTextColor;
         listBox.BorderStyle = BorderStyle.FixedSingle;
-        listBox.Font = new Font("Segoe UI", 10f);
-        listBox.ItemHeight = Math.Max(listBox.ItemHeight, 26);
+        listBox.Font = new Font("Segoe UI", 9.6f);
+        listBox.ItemHeight = Math.Max(listBox.ItemHeight, 28);
         listBox.DrawMode = DrawMode.OwnerDrawFixed;
         listBox.DrawItem -= DrawListBoxItem;
         listBox.DrawItem += DrawListBoxItem;
@@ -359,38 +404,56 @@ public class PreferencesWindow : Form
     {
         grid.BackgroundColor = SurfaceColor;
         grid.BorderStyle = BorderStyle.None;
-        grid.GridColor = BorderColor;
+        grid.GridColor = BorderSoftColor;
         grid.EnableHeadersVisualStyles = false;
         grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
         grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         grid.ColumnHeadersDefaultCellStyle.BackColor = SurfaceAltColor;
         grid.ColumnHeadersDefaultCellStyle.ForeColor = PrimaryTextColor;
-        grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-        grid.ColumnHeadersHeight = 34;
+        grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9.2f, FontStyle.Bold);
+        grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 3, 8, 3);
+        grid.ColumnHeadersHeight = 36;
         grid.DefaultCellStyle.BackColor = FieldColor;
         grid.DefaultCellStyle.ForeColor = PrimaryTextColor;
-        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(42, 138, 206);
-        grid.DefaultCellStyle.SelectionForeColor = Color.White;
-        grid.DefaultCellStyle.Padding = new Padding(8, 2, 8, 2);
-        grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(232, 247, 252);
-        grid.RowTemplate.Height = Math.Max(grid.RowTemplate.Height, 30);
+        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(232, 242, 253);
+        grid.DefaultCellStyle.SelectionForeColor = PrimaryTextColor;
+        grid.DefaultCellStyle.Padding = new Padding(8, 3, 8, 3);
+        grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(252, 252, 251);
+        grid.RowTemplate.Height = Math.Max(grid.RowTemplate.Height, 32);
     }
 
     private static void StyleButton(Button button, bool primary)
     {
-        button.BackColor = primary ? AccentColor : Color.FromArgb(197, 230, 240);
+        button.BackColor = primary ? PrimaryButtonColor : SurfaceColor;
         button.ForeColor = primary ? Color.White : PrimaryTextColor;
         button.FlatStyle = FlatStyle.Flat;
+        button.UseVisualStyleBackColor = false;
         button.FlatAppearance.BorderSize = 1;
-        button.FlatAppearance.BorderColor = primary ? AccentHoverColor : Color.FromArgb(148, 216, 232);
-        button.FlatAppearance.MouseOverBackColor = primary ? AccentHoverColor : Color.FromArgb(215, 242, 249);
-        button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(226, 74, 37) : Color.FromArgb(178, 218, 232);
-        button.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
-        if (button.Width < 112) button.Width = 112;
-        if (button.Height < 38) button.Height = 38;
+        button.FlatAppearance.BorderColor = primary ? PrimaryButtonColor : BorderColor;
+        button.FlatAppearance.MouseOverBackColor = primary ? PrimaryButtonHoverColor : HoverColor;
+        button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(0, 0, 0) : BorderSoftColor;
+        button.Font = new Font("Segoe UI", 9.4f, primary ? FontStyle.Bold : FontStyle.Regular);
+        button.TextAlign = ContentAlignment.MiddleCenter;
+        button.AutoSize = false;
+        button.Margin = new Padding(0, 0, 8, 0);
+        button.Padding = new Padding(10, 0, 10, 0);
+        FitButtonToText(button);
         button.Resize -= RoundButtonOnResize;
-        button.Resize += RoundButtonOnResize;
-        ApplyRoundedRegion(button);
+        button.Region?.Dispose();
+        button.Region = null;
+    }
+
+    private static void FitButtonToText(Button button)
+    {
+        var textSize = TextRenderer.MeasureText(
+            button.Text,
+            button.Font,
+            Size.Empty,
+            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        var minWidth = Math.Max(112, textSize.Width + 52);
+        var minHeight = Math.Max(42, textSize.Height + 20);
+        button.MinimumSize = new Size(minWidth, minHeight);
+        button.Size = new Size(Math.Max(button.Width, minWidth), Math.Max(button.Height, minHeight));
     }
 
     private static void RoundButtonOnResize(object? sender, EventArgs e)
@@ -406,8 +469,8 @@ public class PreferencesWindow : Form
         if (sender is not ListBox listBox || e.Index < 0 || e.Index >= listBox.Items.Count) return;
 
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-        var back = selected ? Color.FromArgb(58, 147, 190) : listBox.BackColor;
-        var fore = selected ? Color.White : PrimaryTextColor;
+        var back = selected ? Color.FromArgb(232, 242, 253) : listBox.BackColor;
+        var fore = PrimaryTextColor;
 
         using (var fill = new SolidBrush(back))
         {
@@ -428,7 +491,7 @@ public class PreferencesWindow : Form
     {
         if (button.Width <= 0 || button.Height <= 0) return;
         button.Region?.Dispose();
-        button.Region = new Region(RoundedRect(new Rectangle(0, 0, button.Width, button.Height), Math.Max(10, button.Height / 2)));
+        button.Region = new Region(RoundedRect(new Rectangle(0, 0, button.Width, button.Height), 6));
     }
 
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -448,45 +511,223 @@ public class PreferencesWindow : Form
         return path;
     }
 
+    private static Panel CreatePreferencesPage(bool autoScroll = false)
+    {
+        return new Panel
+        {
+            AutoScroll = autoScroll,
+            Padding = new Padding(0, 4, 8, 0),
+            BackColor = SurfaceColor
+        };
+    }
+
+    private static TableLayoutPanel CreateSettingsStack(Control host)
+    {
+        var table = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left,
+            ColumnCount = 1,
+            RowCount = 0,
+            Padding = new Padding(0, 0, 0, 28),
+            Margin = Padding.Empty,
+            Width = ContentMaxWidth,
+            MinimumSize = new Size(320, 0)
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        ConstrainStackWidth(host, table);
+        host.SizeChanged += (_, _) => ConstrainStackWidth(host, table);
+        return table;
+    }
+
+    private static void ConstrainStackWidth(Control host, Control stack)
+    {
+        var available = Math.Max(320, host.ClientSize.Width - host.Padding.Horizontal - 16);
+        stack.Width = Math.Min(ContentMaxWidth, available);
+    }
+
+    private static void AddStackSection(TableLayoutPanel table, string text)
+    {
+        var row = table.RowCount++;
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, row == 0 ? 42 : 58));
+
+        var label = new Label
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            Font = new Font("Segoe UI", 10.4f, FontStyle.Bold),
+            ForeColor = PrimaryTextColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(0, row == 0 ? 0 : 18, 0, 0),
+            Margin = Padding.Empty
+        };
+
+        table.Controls.Add(label, 0, row);
+    }
+
+    private static void AddStackField(
+        TableLayoutPanel table,
+        string labelText,
+        Control control,
+        string? hint = null,
+        int controlHeight = 34,
+        int hintHeight = 28)
+    {
+        var row = table.RowCount++;
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var field = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            ColumnCount = 1,
+            RowCount = string.IsNullOrWhiteSpace(hint) ? 2 : 3,
+            Margin = new Padding(0, 0, 0, 18),
+            Padding = Padding.Empty,
+            Width = table.Width
+        };
+        field.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        table.SizeChanged += (_, _) => field.Width = table.Width;
+        field.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        field.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var label = new Label
+        {
+            Text = labelText,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ForeColor = MutedTextColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 0, 0, 6)
+        };
+
+        control.Dock = DockStyle.Top;
+        control.Margin = Padding.Empty;
+        if (control is TextBox { Multiline: true } || control is ListBox || control is DataGridView)
+        {
+            control.Height = controlHeight;
+        }
+        else
+        {
+            control.MinimumSize = new Size(0, controlHeight);
+        }
+
+        field.Controls.Add(label, 0, 0);
+        field.Controls.Add(control, 0, 1);
+
+        if (!string.IsNullOrWhiteSpace(hint))
+        {
+            field.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            field.Controls.Add(CreateHintLabel(hint, hintHeight), 0, 2);
+        }
+
+        table.Controls.Add(field, 0, row);
+        table.SetColumn(field, 0);
+    }
+
+    private static Label CreateHintLabel(string text, int height = 34)
+    {
+        return new Label
+        {
+            Text = text,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            MaximumSize = new Size(ContentMaxWidth, 0),
+            ForeColor = MutedTextColor,
+            TextAlign = ContentAlignment.TopLeft,
+            Padding = new Padding(0, 7, 0, 0),
+            Margin = new Padding(0, 0, 0, 0)
+        };
+    }
+
+    private static Label CreateInlineStatusLabel()
+    {
+        return new Label
+        {
+            Text = "",
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            ForeColor = MutedTextColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(8, 0, 0, 0)
+        };
+    }
+
+    private static FlowLayoutPanel CreateButtonRow()
+    {
+        return new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Padding = new Padding(0, 6, 0, 0),
+            Margin = Padding.Empty
+        };
+    }
+
+    private static void AddStackElement(TableLayoutPanel table, Control control, int bottomMargin = 18)
+    {
+        var row = table.RowCount++;
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        control.Dock = DockStyle.Top;
+        control.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        control.Width = table.Width;
+        control.Margin = new Padding(0, 0, 0, bottomMargin);
+        table.Controls.Add(control, 0, row);
+        table.SizeChanged += (_, _) => control.Width = table.Width;
+    }
+
+    private static ComboBox CreateDropdown()
+    {
+        return new ComboBox
+        {
+            Dock = DockStyle.Top,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Standard,
+            IntegralHeight = false,
+            Margin = Padding.Empty
+        };
+    }
+
     private Panel CreateGeneralTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
-        tab.AutoScroll = true;
+        var tab = CreatePreferencesPage(autoScroll: true);
+        var root = CreateSettingsStack(tab);
 
-        // Provider selection
-        var providerLabel = new Label
-        {
-            Text = "Transcription Provider:",
-            Location = new Point(15, 20),
-            AutoSize = true
-        };
+        AddStackSection(root, "Transcription");
 
-        _providerCombo = new HudDropdown
-        {
-            Location = new Point(15, 48),
-            Size = new Size(300, 38)
-        };
+        _providerCombo = CreateDropdown();
 
         foreach (var provider in TranscriptionProviderFactory.GetAvailableProviders())
         {
             _providerCombo.Items.Add(new ProviderComboItem(provider));
         }
         _providerCombo.SelectedIndexChanged += ProviderCombo_Changed;
+        AddStackField(root, "Provider", _providerCombo);
 
-        // API Key
-        var apiKeyLabel = new Label
+        var apiKeyPanel = new TableLayoutPanel
         {
-            Text = "API Key:",
-            Location = new Point(15, 94),
-            AutoSize = true
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
+        apiKeyPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        apiKeyPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        apiKeyPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        apiKeyPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _apiKeyTextBox = new TextBox
         {
-            Location = new Point(15, 122),
-            Size = new Size(680, 32),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            Dock = DockStyle.Fill,
             UseSystemPasswordChar = true,
             PlaceholderText = "sk-..."
         };
@@ -494,44 +735,60 @@ public class PreferencesWindow : Form
 
         _apiKeyLink = new LinkLabel
         {
-            Text = "Get your API key from platform.openai.com",
-            Location = new Point(15, 156),
+            Text = "Get API key",
+            Dock = DockStyle.Top,
             AutoSize = true,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 8, 0, 0),
+            Padding = new Padding(0, 4, 0, 0)
         };
         _apiKeyLink.Click += ApiKeyLink_Click;
 
-        // Test Connection
         _testConnectionButton = new Button
         {
             Text = "Test Connection",
-            Location = new Point(15, 190),
-            Size = new Size(148, 38),
+            Size = new Size(132, 32),
             FlatStyle = FlatStyle.Flat
         };
         _testConnectionButton.Click += TestConnectionButton_Click;
 
-        _connectionStatusLabel = new Label
-        {
-            Text = "",
-            Location = new Point(176, 198),
-            Size = new Size(520, 24),
-            AutoSize = false,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
+        _connectionStatusLabel = CreateInlineStatusLabel();
 
-        var audioCaptureLabel = new Label
+        var testRow = new TableLayoutPanel
         {
-            Text = "Recording latency mode:",
-            Location = new Point(15, 254),
-            AutoSize = true
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            Padding = new Padding(0, 8, 0, 0),
+            Margin = Padding.Empty
         };
+        testRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+        testRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        testRow.Controls.Add(_testConnectionButton, 0, 0);
+        testRow.Controls.Add(_connectionStatusLabel, 1, 0);
 
-        _audioCaptureModeCombo = new HudDropdown
+        apiKeyPanel.Controls.Add(_apiKeyTextBox, 0, 0);
+        apiKeyPanel.Controls.Add(_apiKeyLink, 0, 1);
+        apiKeyPanel.Controls.Add(testRow, 0, 2);
+        AddStackField(root, "API key", apiKeyPanel, controlHeight: 106);
+
+        var audioPanel = new TableLayoutPanel
         {
-            Location = new Point(15, 282),
-            Size = new Size(320, 38)
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
+        audioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        audioPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        audioPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        _audioCaptureModeCombo = CreateDropdown();
         _audioCaptureModeCombo.Items.AddRange(new object[]
         {
             new AudioCaptureModeComboItem(AudioCaptureMode.Instant, "Instant"),
@@ -540,101 +797,52 @@ public class PreferencesWindow : Form
         });
         _audioCaptureModeCombo.SelectedIndexChanged += (_, _) => UpdateAudioCaptureModeDescription();
 
-        _audioCaptureModeDescriptionLabel = new Label
-        {
-            Text = "",
-            Location = new Point(15, 328),
-            Size = new Size(680, 58),
-            AutoSize = false,
-            ForeColor = Color.Gray,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
+        _audioCaptureModeDescriptionLabel = CreateHintLabel("", 44);
+        audioPanel.Controls.Add(_audioCaptureModeCombo, 0, 0);
+        audioPanel.Controls.Add(_audioCaptureModeDescriptionLabel, 0, 1);
+        AddStackField(root, "Latency", audioPanel, controlHeight: 78);
 
-        var processingModelLabel = new Label
-        {
-            Text = "AI processing model:",
-            Location = new Point(15, 414),
-            AutoSize = true
-        };
+        AddStackSection(root, "AI processing");
 
-        _processingModelCombo = new HudDropdown
-        {
-            Location = new Point(15, 442),
-            Size = new Size(470, 38)
-        };
+        _processingModelCombo = CreateDropdown();
         foreach (var model in ProcessingModelCatalog.GetAvailableModels())
         {
             _processingModelCombo.Items.Add(new ProcessingModelComboItem(model));
         }
-
-        var processingModelHint = new Label
-        {
-            Text = "Used only for Clean/Formel/Casual/Markdown/Super and custom modes. Brut transcription does not call the LLM.",
-            Location = new Point(15, 488),
-            Size = new Size(680, 36),
-            AutoSize = false,
-            ForeColor = Color.Gray,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-
-        var vocabularyLabel = new Label
-        {
-            Text = "Custom vocabulary:",
-            Location = new Point(15, 540),
-            AutoSize = true
-        };
+        AddStackField(
+            root,
+            "Model",
+            _processingModelCombo,
+            "Used by Clean, Formel, Casual, Markdown, Super and custom modes. Brut keeps the raw transcription.",
+            hintHeight: 42);
 
         _customVocabularyTextBox = new TextBox
         {
-            Location = new Point(15, 568),
-            Size = new Size(680, 82),
+            Dock = DockStyle.Fill,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             PlaceholderText = "PostHog, Kubernetes, Chatwoot, project names..."
         };
+        AddStackField(
+            root,
+            "Vocabulary",
+            _customVocabularyTextBox,
+            "Comma-separated terms sent to transcription, then preserved during AI processing.",
+            controlHeight: 84,
+            hintHeight: 36);
 
-        var vocabularyHint = new Label
-        {
-            Text = "Comma-separated terms sent to transcription as a prompt, then preserved during AI processing.",
-            Location = new Point(15, 660),
-            Size = new Size(680, 22),
-            AutoSize = false,
-            ForeColor = Color.Gray,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-
-        tab.Controls.AddRange(new Control[]
-        {
-            providerLabel, _providerCombo,
-            apiKeyLabel, _apiKeyTextBox, _apiKeyLink,
-            _testConnectionButton, _connectionStatusLabel,
-            audioCaptureLabel, _audioCaptureModeCombo, _audioCaptureModeDescriptionLabel,
-            processingModelLabel, _processingModelCombo, processingModelHint,
-            vocabularyLabel, _customVocabularyTextBox, vocabularyHint
-        });
-
+        tab.Controls.Add(root);
         return tab;
     }
 
     private Panel CreateShortcutsTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage(autoScroll: true);
+        var root = CreateSettingsStack(tab);
 
-        // Toggle shortcut
-        var shortcutLabel = new Label
-        {
-            Text = "Toggle Shortcut (start/stop recording):",
-            Location = new Point(15, 20),
-            AutoSize = true
-        };
+        AddStackSection(root, "Recording shortcuts");
 
-        _shortcutCombo = new HudDropdown
-        {
-            Location = new Point(15, 50),
-            Size = new Size(360, 38)
-        };
+        _shortcutCombo = CreateDropdown();
         _shortcutCombo.Items.AddRange(new object[]
         {
             "Ctrl+Shift+Space (recommended)",
@@ -642,55 +850,29 @@ public class PreferencesWindow : Form
             "Ctrl+Space",
             "Win+Shift+Space"
         });
+        AddStackField(root, "Toggle", _shortcutCombo, "Starts or stops a recording.");
 
-        // PTT key
-        var pttLabel = new Label
-        {
-            Text = "Push-to-Talk Key (hold to record):",
-            Location = new Point(15, 108),
-            AutoSize = true
-        };
-
-        _pttCombo = new HudDropdown
-        {
-            Location = new Point(15, 138),
-            Size = new Size(280, 38)
-        };
+        _pttCombo = CreateDropdown();
         _pttCombo.Items.AddRange(new object[]
         {
             "F1", "F2", "F3 (recommended)", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"
         });
+        AddStackField(root, "Push-to-talk", _pttCombo, "Hold this key to record.");
 
-        // Note
-        var noteLabel = new Label
-        {
-            Text = "Note: Changes take effect immediately after saving.",
-            ForeColor = Color.Gray,
-            Location = new Point(15, 204),
-            AutoSize = true
-        };
-
-        tab.Controls.AddRange(new Control[]
-        {
-            shortcutLabel, _shortcutCombo,
-            pttLabel, _pttCombo,
-            noteLabel
-        });
-
+        tab.Controls.Add(root);
         return tab;
     }
 
     private Panel CreateModesTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage();
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 6,
-            Padding = new Padding(4)
+            Padding = new Padding(0)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
@@ -735,27 +917,20 @@ public class PreferencesWindow : Form
         _customModesList.SelectedIndexChanged += (_, _) => UpdateModeButtons();
         _customModesList.DoubleClick += (_, _) => EditSelectedMode();
 
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 4),
-            Margin = Padding.Empty
-        };
+        var buttonPanel = CreateButtonRow();
 
         var addModeButton = new Button
         {
-            Text = "Add...",
-            Size = new Size(104, 32),
+            Text = "Add",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         addModeButton.Click += AddModeButton_Click;
 
         _editModeButton = new Button
         {
-            Text = "Edit...",
-            Size = new Size(104, 32),
+            Text = "Edit",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -764,7 +939,7 @@ public class PreferencesWindow : Form
         _deleteModeButton = new Button
         {
             Text = "Delete",
-            Size = new Size(104, 32),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -796,15 +971,14 @@ public class PreferencesWindow : Form
 
     private Panel CreateAutoModeTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage();
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(4)
+            Padding = new Padding(0)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -848,33 +1022,26 @@ public class PreferencesWindow : Form
         };
         _autoModeRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", FillWeight = 36 });
         _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "Rule", FillWeight = 140 });
-        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Process", HeaderText = "App process", FillWeight = 90 });
-        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "Title contains", FillWeight = 130 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Process", HeaderText = "App", FillWeight = 90 });
+        _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "Title", FillWeight = 130 });
         _autoModeRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode", FillWeight = 90 });
         _autoModeRulesGrid.SelectionChanged += (_, _) => UpdateAutoModeRuleButtons();
         _autoModeRulesGrid.DoubleClick += (_, _) => EditSelectedAutoModeRule();
 
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 4),
-            Margin = Padding.Empty
-        };
+        var buttonPanel = CreateButtonRow();
 
         var addRuleButton = new Button
         {
-            Text = "Add...",
-            Size = new Size(104, 32),
+            Text = "Add",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         addRuleButton.Click += AddAutoModeRuleButton_Click;
 
         _editAutoModeRuleButton = new Button
         {
-            Text = "Edit...",
-            Size = new Size(104, 32),
+            Text = "Edit",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -883,7 +1050,7 @@ public class PreferencesWindow : Form
         _deleteAutoModeRuleButton = new Button
         {
             Text = "Delete",
-            Size = new Size(104, 32),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -914,54 +1081,29 @@ public class PreferencesWindow : Form
 
     private Panel CreateActionsTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage(autoScroll: true);
+        var root = CreateSettingsStack(tab);
 
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 7,
-            Padding = new Padding(4)
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
-
-        var headingLabel = new Label
-        {
-            Text = "Post-transcription actions",
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        AddStackSection(root, "Post-transcription actions");
 
         _postActionsList = new ListBox
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             IntegralHeight = false,
             HorizontalScrollbar = true,
-            Margin = new Padding(0, 0, 0, 8)
+            Height = 132,
+            Margin = Padding.Empty
         };
         _postActionsList.SelectedIndexChanged += (_, _) => UpdatePostActionButtons();
         _postActionsList.DoubleClick += (_, _) => EditSelectedPostAction();
+        AddStackField(root, "Active action", _postActionsList, controlHeight: 132);
 
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 4),
-            Margin = Padding.Empty
-        };
+        var buttonPanel = CreateButtonRow();
 
         _setActivePostActionButton = new Button
         {
             Text = "Set Active",
-            Size = new Size(112, 32),
+            Size = new Size(96, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -969,16 +1111,16 @@ public class PreferencesWindow : Form
 
         var addActionButton = new Button
         {
-            Text = "Add...",
-            Size = new Size(104, 32),
+            Text = "Add",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         addActionButton.Click += AddPostActionButton_Click;
 
         _editPostActionButton = new Button
         {
-            Text = "Edit...",
-            Size = new Size(104, 32),
+            Text = "Edit",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -987,7 +1129,7 @@ public class PreferencesWindow : Form
         _deletePostActionButton = new Button
         {
             Text = "Delete",
-            Size = new Size(104, 32),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -1000,22 +1142,24 @@ public class PreferencesWindow : Form
             _editPostActionButton,
             _deletePostActionButton
         });
+        AddStackElement(root, buttonPanel, bottomMargin: 22);
 
         _autoPostActionEnabledCheckBox = new CheckBox
         {
             Text = "Automatically select action from the active app or window title",
             AutoSize = true,
-            Margin = new Padding(0, 8, 0, 8)
+            Margin = new Padding(0, 0, 0, 12)
         };
         _autoPostActionEnabledCheckBox.CheckedChanged += (_, _) =>
         {
             _autoPostActionRulesGrid.Enabled = _autoPostActionEnabledCheckBox.Checked;
             UpdateAutoPostActionRuleButtons();
         };
+        AddStackElement(root, _autoPostActionEnabledCheckBox, bottomMargin: 10);
 
         _autoPostActionRulesGrid = new DataGridView
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
@@ -1027,37 +1171,32 @@ public class PreferencesWindow : Form
             ReadOnly = true,
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            Margin = new Padding(0, 0, 0, 8)
+            Height = 150,
+            Margin = Padding.Empty
         };
         _autoPostActionRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", FillWeight = 36 });
         _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "Rule", FillWeight = 140 });
-        _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Process", HeaderText = "App process", FillWeight = 90 });
-        _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "Title contains", FillWeight = 130 });
+        _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Process", HeaderText = "App", FillWeight = 90 });
+        _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "Title", FillWeight = 130 });
         _autoPostActionRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Action", HeaderText = "Action", FillWeight = 100 });
         _autoPostActionRulesGrid.SelectionChanged += (_, _) => UpdateAutoPostActionRuleButtons();
         _autoPostActionRulesGrid.DoubleClick += (_, _) => EditSelectedAutoPostActionRule();
+        AddStackField(root, "Action rules", _autoPostActionRulesGrid, controlHeight: 150);
 
-        var autoButtonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 4),
-            Margin = Padding.Empty
-        };
+        var autoButtonPanel = CreateButtonRow();
 
         var addAutoRuleButton = new Button
         {
-            Text = "Add...",
-            Size = new Size(104, 32),
+            Text = "Add",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         addAutoRuleButton.Click += AddAutoPostActionRuleButton_Click;
 
         _editAutoPostActionRuleButton = new Button
         {
-            Text = "Edit...",
-            Size = new Size(104, 32),
+            Text = "Edit",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -1066,37 +1205,19 @@ public class PreferencesWindow : Form
         _deleteAutoPostActionRuleButton = new Button
         {
             Text = "Delete",
-            Size = new Size(104, 32),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
         _deleteAutoPostActionRuleButton.Click += DeleteAutoPostActionRuleButton_Click;
 
         autoButtonPanel.Controls.AddRange(new Control[] { addAutoRuleButton, _editAutoPostActionRuleButton, _deleteAutoPostActionRuleButton });
+        AddStackElement(root, autoButtonPanel, bottomMargin: 14);
 
-        var variablesTextBox = new TextBox
-        {
-            Dock = DockStyle.Fill,
-            Multiline = true,
-            ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
-            WordWrap = false,
-            Text = string.Join(Environment.NewLine, new[]
-            {
-                "Commands receive environment variables:",
-                "WV_TRANSCRIPTION, WV_RAW_TRANSCRIPTION, WV_APP_PROCESS, WV_APP_WINDOW_TITLE, WV_BROWSER_URL, WV_BROWSER_HOST, WV_WORKSPACE, WV_PROJECT, WV_MODE, WV_PROVIDER",
-                "Default action is Paste. Auto-action rules override the active action only when enabled and matched."
-            }),
-            Margin = Padding.Empty
-        };
-
-        root.Controls.Add(headingLabel, 0, 0);
-        root.Controls.Add(_postActionsList, 0, 1);
-        root.Controls.Add(buttonPanel, 0, 2);
-        root.Controls.Add(_autoPostActionEnabledCheckBox, 0, 3);
-        root.Controls.Add(_autoPostActionRulesGrid, 0, 4);
-        root.Controls.Add(autoButtonPanel, 0, 5);
-        root.Controls.Add(variablesTextBox, 0, 6);
+        AddStackElement(
+            root,
+            CreateHintLabel("Command actions receive transcription and context variables. Auto-action rules override the active action only when enabled and matched."),
+            bottomMargin: 0);
 
         tab.Controls.Add(root);
         return tab;
@@ -1104,28 +1225,64 @@ public class PreferencesWindow : Form
 
     private Panel CreateLogsTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage();
+        tab.Padding = new Padding(0, 4, 18, 12);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(4)
+            RowCount = 4,
+            BackColor = SurfaceColor,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0, 0, 0, 14),
+            Padding = Padding.Empty
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var titleLabel = new Label
+        {
+            Text = "Logs",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10.4f, FontStyle.Bold),
+            ForeColor = PrimaryTextColor,
+            Margin = Padding.Empty
+        };
 
         _autoScrollCheckBox = new CheckBox
         {
             Text = "Auto-scroll",
-            Dock = DockStyle.Fill,
             AutoSize = true,
             Checked = true,
-            Margin = Padding.Empty,
+            Margin = new Padding(12, 0, 0, 0),
             TextAlign = ContentAlignment.MiddleLeft
+        };
+
+        header.Controls.Add(titleLabel, 0, 0);
+        header.Controls.Add(_autoScrollCheckBox, 1, 0);
+
+        var currentLogLabel = new Label
+        {
+            Text = "Current log",
+            AutoSize = true,
+            ForeColor = MutedTextColor,
+            Margin = new Padding(0, 0, 0, 8)
         };
 
         _logTextBox = new TextBox
@@ -1136,22 +1293,15 @@ public class PreferencesWindow : Form
             ScrollBars = ScrollBars.Both,
             Font = new Font("Consolas", 8.5F),
             WordWrap = false,
-            Margin = new Padding(0, 0, 0, 8)
+            Margin = new Padding(0, 0, 0, 14)
         };
 
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 6, 0, 0),
-            Margin = Padding.Empty
-        };
+        var buttonPanel = CreateButtonRow();
 
         var clearLogsButton = new Button
         {
             Text = "Clear",
-            Size = new Size(96, 30),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         clearLogsButton.Click += ClearLogsButton_Click;
@@ -1159,16 +1309,17 @@ public class PreferencesWindow : Form
         var openLogFolderButton = new Button
         {
             Text = "Open Folder",
-            Size = new Size(112, 30),
+            Size = new Size(112, 32),
             FlatStyle = FlatStyle.Flat
         };
         openLogFolderButton.Click += (_, _) => Logger.OpenLogFolder();
 
         buttonPanel.Controls.AddRange(new Control[] { clearLogsButton, openLogFolderButton });
 
-        root.Controls.Add(_autoScrollCheckBox, 0, 0);
-        root.Controls.Add(_logTextBox, 0, 1);
-        root.Controls.Add(buttonPanel, 0, 2);
+        root.Controls.Add(header, 0, 0);
+        root.Controls.Add(currentLogLabel, 0, 1);
+        root.Controls.Add(_logTextBox, 0, 2);
+        root.Controls.Add(buttonPanel, 0, 3);
 
         tab.Controls.Add(root);
 
@@ -1177,59 +1328,48 @@ public class PreferencesWindow : Form
 
     private Panel CreateProjectsTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
-
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(4)
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        var tab = CreatePreferencesPage(autoScroll: true);
+        var root = CreateSettingsStack(tab);
 
         _projectTaggingEnabledCheckBox = new CheckBox
         {
             Text = "Predict and save projects for recordings",
             AutoSize = true,
-            Margin = new Padding(0, 0, 0, 10)
+            Margin = Padding.Empty
         };
+        AddStackElement(root, _projectTaggingEnabledCheckBox, bottomMargin: 18);
+        AddStackSection(root, "Projects");
 
         _projectsList = new ListBox
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             IntegralHeight = false,
             HorizontalScrollbar = true,
-            Margin = new Padding(0, 0, 0, 8)
-        };
-        _projectsList.SelectedIndexChanged += (_, _) => UpdateProjectButtons();
-        _projectsList.DoubleClick += (_, _) => RenameSelectedProject();
-
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 4),
+            Height = 170,
             Margin = Padding.Empty
         };
+        _projectsList.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateProjectButtons();
+            LoadSelectedProjectDetails();
+        };
+        _projectsList.DoubleClick += (_, _) => RenameSelectedProject();
+        AddStackField(root, "Project list", _projectsList, controlHeight: 170);
+
+        var buttonPanel = CreateButtonRow();
 
         var addProjectButton = new Button
         {
-            Text = "Add...",
-            Size = new Size(104, 32),
+            Text = "Add",
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         addProjectButton.Click += AddProjectButton_Click;
 
         _renameProjectButton = new Button
         {
-            Text = "Rename...",
-            Size = new Size(112, 32),
+            Text = "Rename",
+            Size = new Size(96, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
@@ -1238,29 +1378,70 @@ public class PreferencesWindow : Form
         _archiveProjectButton = new Button
         {
             Text = "Archive",
-            Size = new Size(104, 32),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat,
             Enabled = false
         };
         _archiveProjectButton.Click += ArchiveProjectButton_Click;
 
         buttonPanel.Controls.AddRange(new Control[] { addProjectButton, _renameProjectButton, _archiveProjectButton });
+        AddStackElement(root, buttonPanel, bottomMargin: 16);
 
-        var hintLabel = new Label
+        AddStackSection(root, "Selected project");
+
+        _projectDefaultModeCombo = CreateDropdown();
+        _projectDefaultModeCombo.SelectedIndexChanged += (_, _) => UpdateSelectedProjectFromDetails();
+        AddStackField(root, "Default mode", _projectDefaultModeCombo);
+
+        _projectContextNotesTextBox = new TextBox
         {
-            Text = "Archived projects stay in history but are no longer suggested during recording.",
-            ForeColor = Color.Gray,
-            AutoSize = false,
-            Dock = DockStyle.Fill,
-            AutoEllipsis = true,
-            TextAlign = ContentAlignment.MiddleLeft,
+            Dock = DockStyle.Top,
+            Multiline = true,
+            AcceptsReturn = true,
+            ScrollBars = ScrollBars.Vertical,
+            Height = 120,
+            PlaceholderText = "Add anything Whisper Voice should know for this project: constraints, vocabulary, people, expected tone, decision history..."
+        };
+        _projectContextNotesTextBox.TextChanged += (_, _) => UpdateSelectedProjectFromDetails();
+        AddStackField(root, "Context notes", _projectContextNotesTextBox, controlHeight: 120);
+
+        _projectDocumentsList = new ListBox
+        {
+            Dock = DockStyle.Top,
+            IntegralHeight = false,
+            HorizontalScrollbar = true,
+            Height = 130,
             Margin = Padding.Empty
         };
+        _projectDocumentsList.SelectedIndexChanged += (_, _) => UpdateProjectButtons();
+        AddStackField(root, "Imported context files", _projectDocumentsList, controlHeight: 130);
 
-        root.Controls.Add(_projectTaggingEnabledCheckBox, 0, 0);
-        root.Controls.Add(_projectsList, 0, 1);
-        root.Controls.Add(buttonPanel, 0, 2);
-        root.Controls.Add(hintLabel, 0, 3);
+        var documentsButtonPanel = CreateButtonRow();
+
+        _importProjectFileButton = new Button
+        {
+            Text = "Import",
+            Size = new Size(88, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _importProjectFileButton.Click += ImportProjectFileButton_Click;
+
+        _removeProjectDocumentButton = new Button
+        {
+            Text = "Remove",
+            Size = new Size(88, 32),
+            FlatStyle = FlatStyle.Flat,
+            Enabled = false
+        };
+        _removeProjectDocumentButton.Click += RemoveProjectDocumentButton_Click;
+
+        documentsButtonPanel.Controls.AddRange(new Control[] { _importProjectFileButton, _removeProjectDocumentButton });
+        AddStackElement(root, documentsButtonPanel, bottomMargin: 14);
+        AddStackElement(
+            root,
+            CreateHintLabel("Project context is used only by AI modes and is added explicitly to the prompt for the selected or predicted project."),
+            bottomMargin: 0);
 
         tab.Controls.Add(root);
         return tab;
@@ -1268,18 +1449,42 @@ public class PreferencesWindow : Form
 
     private Panel CreateJournalTab()
     {
-        var tab = new Panel();
-        tab.Padding = new Padding(12);
+        var tab = CreatePreferencesPage();
+        tab.Padding = new Padding(0, 4, 18, 12);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 6,
+            BackColor = SurfaceColor,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 54));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 46));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var titleLabel = new Label
+        {
+            Text = "Journal",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10.4f, FontStyle.Bold),
+            ForeColor = PrimaryTextColor,
+            Margin = new Padding(0, 0, 0, 10)
+        };
+
+        var recentLabel = new Label
+        {
+            Text = "Recent recordings",
+            AutoSize = true,
+            ForeColor = MutedTextColor,
+            Margin = new Padding(0, 0, 0, 8)
+        };
 
         _journalGrid = new DataGridView
         {
@@ -1295,18 +1500,22 @@ public class PreferencesWindow : Form
             ReadOnly = true,
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            Margin = new Padding(0, 0, 0, 16)
+        };
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Time", HeaderText = "Time", FillWeight = 90, MinimumWidth = 86 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", FillWeight = 92, MinimumWidth = 92 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode", FillWeight = 115, MinimumWidth = 105 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Provider", HeaderText = "Provider", FillWeight = 160, MinimumWidth = 150 });
+        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Total", HeaderText = "Total", FillWeight = 78, MinimumWidth = 82 });
+        _journalGrid.SelectionChanged += (_, _) => UpdateJournalDetails();
+
+        var selectedLabel = new Label
+        {
+            Text = "Selected recording",
+            AutoSize = true,
+            ForeColor = MutedTextColor,
             Margin = new Padding(0, 0, 0, 8)
         };
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Time", HeaderText = "Time", FillWeight = 90 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", FillWeight = 70 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode", FillWeight = 85 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Provider", HeaderText = "Provider", FillWeight = 90 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Total", HeaderText = "Total", FillWeight = 65 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Recording", HeaderText = "Rec", FillWeight = 65 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Transcribe", HeaderText = "Trans", FillWeight = 65 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Processing", HeaderText = "AI", FillWeight = 65 });
-        _journalGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Action", HeaderText = "Action", FillWeight = 65 });
-        _journalGrid.SelectionChanged += (_, _) => UpdateJournalDetails();
 
         _journalDetailsTextBox = new TextBox
         {
@@ -1316,22 +1525,15 @@ public class PreferencesWindow : Form
             ScrollBars = ScrollBars.Both,
             WordWrap = false,
             Font = new Font("Consolas", 8.5F),
-            Margin = new Padding(0, 0, 0, 8)
+            Margin = new Padding(0, 0, 0, 14)
         };
 
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 6, 0, 0),
-            Margin = Padding.Empty
-        };
+        var buttonPanel = CreateButtonRow();
 
         var refreshButton = new Button
         {
             Text = "Refresh",
-            Size = new Size(96, 30),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         refreshButton.Click += (_, _) => RefreshJournal();
@@ -1339,7 +1541,7 @@ public class PreferencesWindow : Form
         var openFolderButton = new Button
         {
             Text = "Open Folder",
-            Size = new Size(112, 30),
+            Size = new Size(112, 32),
             FlatStyle = FlatStyle.Flat
         };
         openFolderButton.Click += (_, _) => RecordingJournal.OpenFolder();
@@ -1347,16 +1549,19 @@ public class PreferencesWindow : Form
         var clearButton = new Button
         {
             Text = "Clear",
-            Size = new Size(96, 30),
+            Size = new Size(88, 32),
             FlatStyle = FlatStyle.Flat
         };
         clearButton.Click += ClearJournalButton_Click;
 
         buttonPanel.Controls.AddRange(new Control[] { refreshButton, openFolderButton, clearButton });
 
-        root.Controls.Add(_journalGrid, 0, 0);
-        root.Controls.Add(_journalDetailsTextBox, 0, 1);
-        root.Controls.Add(buttonPanel, 0, 2);
+        root.Controls.Add(titleLabel, 0, 0);
+        root.Controls.Add(recentLabel, 0, 1);
+        root.Controls.Add(_journalGrid, 0, 2);
+        root.Controls.Add(selectedLabel, 0, 3);
+        root.Controls.Add(_journalDetailsTextBox, 0, 4);
+        root.Controls.Add(buttonPanel, 0, 5);
 
         tab.Controls.Add(root);
         return tab;
@@ -1574,6 +1779,7 @@ public class PreferencesWindow : Form
         }
 
         RefreshProjectsList();
+        SelectProjectByName(dialog.ProjectName);
     }
 
     private void RenameSelectedProject()
@@ -1601,6 +1807,59 @@ public class PreferencesWindow : Form
 
         item.Project.Archived = true;
         RefreshProjectsList();
+    }
+
+    private void ImportProjectFileButton_Click(object? sender, EventArgs e)
+    {
+        var project = GetSelectedProject();
+        if (project == null) return;
+
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Import project context file",
+            Filter = "Text files (*.txt;*.md;*.csv;*.json;*.log)|*.txt;*.md;*.csv;*.json;*.log|All files (*.*)|*.*",
+            Multiselect = true,
+            CheckFileExists = true
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var imported = 0;
+        foreach (var fileName in dialog.FileNames)
+        {
+            try
+            {
+                project.Documents.Add(ProjectStore.ImportDocument(fileName));
+                imported++;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import '{Path.GetFileName(fileName)}': {ex.Message}", "Import Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        if (imported > 0)
+        {
+            RefreshProjectDocumentsList(project);
+        }
+    }
+
+    private void RemoveProjectDocumentButton_Click(object? sender, EventArgs e)
+    {
+        var project = GetSelectedProject();
+        if (project == null || _projectDocumentsList.SelectedItem is not ProjectDocumentListItem item) return;
+
+        var result = MessageBox.Show(
+            $"Remove '{item.Document.FileName}' from this project context?",
+            "Remove Context File",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (result != DialogResult.Yes) return;
+
+        project.Documents.Remove(item.Document);
+        RefreshProjectDocumentsList(project);
     }
 
     private void RefreshProjectsList()
@@ -1640,6 +1899,7 @@ public class PreferencesWindow : Form
         }
 
         UpdateProjectButtons();
+        LoadSelectedProjectDetails();
     }
 
     private void UpdateProjectButtons()
@@ -1648,6 +1908,110 @@ public class PreferencesWindow : Form
         var hasSelection = item != null;
         _renameProjectButton.Enabled = hasSelection;
         _archiveProjectButton.Enabled = hasSelection && item?.Project.Archived == false;
+        if (_importProjectFileButton != null)
+        {
+            _importProjectFileButton.Enabled = hasSelection && item?.Project.Archived == false;
+        }
+
+        if (_removeProjectDocumentButton != null)
+        {
+            _removeProjectDocumentButton.Enabled =
+                hasSelection &&
+                item?.Project.Archived == false &&
+                _projectDocumentsList?.SelectedItem is ProjectDocumentListItem;
+        }
+    }
+
+    private ProjectConfig? GetSelectedProject() =>
+        (_projectsList?.SelectedItem as ProjectListItem)?.Project;
+
+    private void LoadSelectedProjectDetails()
+    {
+        if (_projectDefaultModeCombo == null || _projectContextNotesTextBox == null || _projectDocumentsList == null)
+        {
+            return;
+        }
+
+        var project = GetSelectedProject();
+        _loadingProjectDetails = true;
+        try
+        {
+            RefreshProjectModeCombo(project?.DefaultModeId);
+            _projectContextNotesTextBox.Text = project?.ContextNotes ?? "";
+            _projectContextNotesTextBox.Enabled = project != null && !project.Archived;
+            _projectDefaultModeCombo.Enabled = project != null && !project.Archived;
+            RefreshProjectDocumentsList(project);
+        }
+        finally
+        {
+            _loadingProjectDetails = false;
+        }
+
+        UpdateProjectButtons();
+    }
+
+    private void RefreshProjectModeCombo(string? selectedModeId)
+    {
+        _projectDefaultModeCombo.Items.Clear();
+        _projectDefaultModeCombo.Items.Add(new ProjectModeComboItem(null));
+
+        foreach (var mode in GetAvailableModesForAutoRules())
+        {
+            _projectDefaultModeCombo.Items.Add(new ProjectModeComboItem(mode));
+        }
+
+        var selectedIndex = 0;
+        if (!string.IsNullOrWhiteSpace(selectedModeId))
+        {
+            for (var i = 0; i < _projectDefaultModeCombo.Items.Count; i++)
+            {
+                if (_projectDefaultModeCombo.Items[i] is ProjectModeComboItem item &&
+                    string.Equals(item.ModeId, selectedModeId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
+
+        _projectDefaultModeCombo.SelectedIndex = selectedIndex;
+    }
+
+    private void UpdateSelectedProjectFromDetails()
+    {
+        if (_loadingProjectDetails) return;
+
+        var project = GetSelectedProject();
+        if (project == null) return;
+
+        project.DefaultModeId = (_projectDefaultModeCombo.SelectedItem as ProjectModeComboItem)?.ModeId ?? "";
+        project.ContextNotes = _projectContextNotesTextBox.Text;
+    }
+
+    private void RefreshProjectDocumentsList(ProjectConfig? project)
+    {
+        _projectDocumentsList.Items.Clear();
+        if (project?.Documents == null) return;
+
+        foreach (var document in project.Documents.OrderByDescending(document => document.ImportedAt))
+        {
+            _projectDocumentsList.Items.Add(new ProjectDocumentListItem(document));
+        }
+
+        UpdateProjectButtons();
+    }
+
+    private void SelectProjectByName(string projectName)
+    {
+        for (var i = 0; i < _projectsList.Items.Count; i++)
+        {
+            if (_projectsList.Items[i] is ProjectListItem item &&
+                string.Equals(item.Project.Name, projectName, StringComparison.OrdinalIgnoreCase))
+            {
+                _projectsList.SelectedIndex = i;
+                return;
+            }
+        }
     }
 
     private static string PickProjectColor(int index)
@@ -2108,7 +2472,7 @@ public class PreferencesWindow : Form
             else
             {
                 var host = new Uri(item.Info.ApiKeyHelpUrl).Host;
-                _apiKeyLink.Text = $"Get your API key from {host}";
+                _apiKeyLink.Text = $"Get API key ({host})";
                 _apiKeyLink.Tag = item.Info.ApiKeyHelpUrl;
                 _apiKeyLink.Enabled = true;
                 _apiKeyTextBox.Enabled = true;
@@ -2284,6 +2648,7 @@ public class PreferencesWindow : Form
         var processingModel = (_processingModelCombo.SelectedItem as ProcessingModelComboItem)?.Info.Id
             ?? ProcessingModelCatalog.DefaultModel;
         var customVocabulary = ParseVocabulary(_customVocabularyTextBox.Text);
+        UpdateSelectedProjectFromDetails();
 
         var providerApiKeys = new Dictionary<string, string>(
             _originalConfig.ProviderApiKeys ?? new Dictionary<string, string>(),
@@ -2340,6 +2705,26 @@ public class PreferencesWindow : Form
         base.OnFormClosing(e);
     }
 
+    private sealed class FooterBarPanel : Panel
+    {
+        public FooterBarPanel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using var pen = new Pen(BorderSoftColor);
+            e.Graphics.DrawLine(pen, 0, 0, Width, 0);
+        }
+    }
+
     private sealed record PreferenceSection(string Title, Panel Page, PreferenceNavButton Button);
 
     private sealed class PreferenceNavButton : Control
@@ -2370,9 +2755,9 @@ public class PreferencesWindow : Form
                 ControlStyles.Selectable,
                 true);
             Cursor = Cursors.Hand;
-            BackColor = GlassTopColor;
+            BackColor = SurfaceColor;
             ForeColor = PrimaryTextColor;
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            Font = new Font("Segoe UI", 9.6f, FontStyle.Regular);
             TabStop = true;
         }
 
@@ -2426,31 +2811,38 @@ public class PreferencesWindow : Form
 
             var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
             var fillColor = Selected
-                ? Color.FromArgb(238, 250, 254)
+                ? SurfaceAltColor
                 : _pressed
-                    ? Color.FromArgb(170, 225, 239)
+                    ? BorderSoftColor
                     : _hovering || Focused
-                        ? Color.FromArgb(206, 238, 247)
-                        : Color.FromArgb(181, 224, 238);
-            var borderColor = Selected ? Color.White : Color.FromArgb(125, 194, 214);
-            var textColor = Selected ? PrimaryTextColor : Color.FromArgb(68, 111, 130);
+                        ? HoverColor
+                        : SurfaceColor;
+            var borderColor = Focused ? BorderColor : fillColor;
+            var textColor = Selected ? PrimaryTextColor : MutedTextColor;
 
-            using (var path = RoundedRect(bounds, 16))
+            using (var path = RoundedRect(bounds, 6))
             using (var fill = new SolidBrush(fillColor))
-            using (var border = new Pen(borderColor, Selected ? 1.6f : 1f))
+            using (var border = new Pen(borderColor, Focused ? 1.2f : 1f))
             {
                 g.FillPath(fill, path);
                 g.DrawPath(border, path);
             }
 
-            using var font = new Font("Segoe UI", 10f, Selected ? FontStyle.Bold : FontStyle.Regular);
+            if (Selected)
+            {
+                using var accent = new SolidBrush(AccentColor);
+                g.FillRectangle(accent, 0, 9, 3, Math.Max(10, Height - 18));
+            }
+
+            using var font = new Font("Segoe UI", 9.6f, Selected ? FontStyle.Bold : FontStyle.Regular);
+            var textBounds = new Rectangle(14, 0, Math.Max(1, Width - 20), Height);
             TextRenderer.DrawText(
                 g,
                 Text,
                 font,
-                bounds,
+                textBounds,
                 textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 
@@ -2499,7 +2891,7 @@ public class PreferencesWindow : Form
             BackColor = FieldColor;
             ForeColor = PrimaryTextColor;
             Cursor = Cursors.Hand;
-            Height = 38;
+            Height = 34;
             TabStop = true;
 
             _dropDown.Padding = Padding.Empty;
@@ -2510,10 +2902,10 @@ public class PreferencesWindow : Form
 
             _listBox.BorderStyle = BorderStyle.None;
             _listBox.DrawMode = DrawMode.OwnerDrawFixed;
-            _listBox.ItemHeight = 32;
+            _listBox.ItemHeight = 30;
             _listBox.BackColor = FieldColor;
             _listBox.ForeColor = PrimaryTextColor;
-            _listBox.Font = new Font("Segoe UI", 10f);
+            _listBox.Font = new Font("Segoe UI", 9.6f);
             _listBox.IntegralHeight = false;
             _listBox.DrawItem += DrawListItem;
             _listBox.Click += (_, _) =>
@@ -2588,12 +2980,12 @@ public class PreferencesWindow : Form
 
             var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
             var fillColor = _pressed
-                ? Color.FromArgb(220, 246, 252)
+                ? BorderSoftColor
                 : _hovering || Focused
-                    ? Color.FromArgb(248, 253, 255)
+                    ? HoverColor
                     : FieldColor;
 
-            using (var path = RoundedRect(bounds, Math.Min(14, Height / 2)))
+            using (var path = RoundedRect(bounds, 6))
             using (var fill = new SolidBrush(fillColor))
             using (var border = new Pen(Focused ? AccentColor : BorderColor, Focused ? 1.6f : 1f))
             {
@@ -2613,7 +3005,7 @@ public class PreferencesWindow : Form
 
             var cx = Width - 22;
             var cy = Height / 2 + 1;
-            using var arrowBrush = new SolidBrush(Color.FromArgb(35, 58, 74));
+            using var arrowBrush = new SolidBrush(MutedTextColor);
             var arrow = new[]
             {
                 new Point(cx - 5, cy - 3),
@@ -2663,10 +3055,10 @@ public class PreferencesWindow : Form
             if (e.Index < 0 || e.Index >= _listBox.Items.Count) return;
 
             var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            using var fill = new SolidBrush(selected ? Color.FromArgb(58, 147, 190) : FieldColor);
+            using var fill = new SolidBrush(selected ? Color.FromArgb(232, 242, 253) : FieldColor);
             e.Graphics.FillRectangle(fill, e.Bounds);
 
-            var color = selected ? Color.White : PrimaryTextColor;
+            var color = PrimaryTextColor;
             var bounds = new Rectangle(e.Bounds.X + 12, e.Bounds.Y, e.Bounds.Width - 24, e.Bounds.Height);
             TextRenderer.DrawText(
                 e.Graphics,
@@ -2739,11 +3131,7 @@ public class PreferencesWindow : Form
                 entry.Status,
                 entry.Mode,
                 entry.ProviderName,
-                FormatMs(entry.TotalMs),
-                FormatStepMs(entry, "record_audio"),
-                FormatStepMs(entry, "transcribe_audio"),
-                FormatStepMs(entry, "ai_processing"),
-                FormatStepMs(entry, "post_action", "paste_result"));
+                FormatMs(entry.TotalMs));
 
             var row = _journalGrid.Rows[rowIndex];
             row.Tag = entry;
@@ -2920,6 +3308,36 @@ public class PreferencesWindow : Form
         {
             var suffix = Project.Archived ? " (archived)" : "";
             return $"{Project.Name}{suffix}";
+        }
+    }
+
+    private class ProjectModeComboItem
+    {
+        public string ModeId { get; }
+        private readonly string _label;
+
+        public ProjectModeComboItem(AIMode? mode)
+        {
+            ModeId = mode?.Id ?? "";
+            _label = mode == null ? "No project default" : mode.Name;
+        }
+
+        public override string ToString() => _label;
+    }
+
+    private class ProjectDocumentListItem
+    {
+        public ProjectContextDocument Document { get; }
+
+        public ProjectDocumentListItem(ProjectContextDocument document)
+        {
+            Document = document;
+        }
+
+        public override string ToString()
+        {
+            var imported = Document.ImportedAt == default ? "" : $" - {Document.ImportedAt:g}";
+            return $"{Document.FileName} ({Document.CharacterCount:N0} chars){imported}";
         }
     }
 }
