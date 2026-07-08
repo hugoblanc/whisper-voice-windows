@@ -50,11 +50,11 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
 
     public abstract bool ValidateApiKeyFormat(string apiKey, out string? errorMessage);
 
-    public async Task<string> TranscribeAsync(string audioFilePath)
+    public async Task<string> TranscribeAsync(string audioFilePath, string? prompt = null)
     {
         ValidateAudioFile(audioFilePath);
         CheckNetworkAvailability();
-        return await TranscribeWithRetryAsync(audioFilePath);
+        return await TranscribeWithRetryAsync(audioFilePath, prompt);
     }
 
     protected void ValidateAudioFile(string audioFilePath)
@@ -134,7 +134,7 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
     /// </summary>
     protected abstract Task TestApiCredentialsAsync();
 
-    protected async Task<string> TranscribeWithRetryAsync(string audioFilePath)
+    protected async Task<string> TranscribeWithRetryAsync(string audioFilePath, string? prompt)
     {
         Exception? lastException = null;
 
@@ -143,7 +143,7 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
             try
             {
                 Logger.Info($"API request attempt {attempt}/{MaxRetries} to {ProviderId}");
-                var result = await SendTranscriptionRequestAsync(audioFilePath);
+                var result = await SendTranscriptionRequestAsync(audioFilePath, prompt);
                 Logger.Info($"API request successful on attempt {attempt}");
                 return result;
             }
@@ -165,7 +165,7 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
         throw FormatException(lastException);
     }
 
-    protected virtual async Task<string> SendTranscriptionRequestAsync(string audioFilePath)
+    protected virtual async Task<string> SendTranscriptionRequestAsync(string audioFilePath, string? prompt)
     {
         using var content = new MultipartFormDataContent();
 
@@ -184,6 +184,11 @@ public abstract class BaseTranscriptionProvider : ITranscriptionProvider
 
         content.Add(audioContent, "file", Path.GetFileName(audioFilePath));
         content.Add(new StringContent(ModelName), "model");
+        if (!string.IsNullOrWhiteSpace(prompt))
+        {
+            content.Add(new StringContent(prompt), "prompt");
+            Logger.Info($"Using custom vocabulary prompt ({prompt.Length} chars)");
+        }
 
         Logger.Debug($"POST {ApiEndpoint} with model={ModelName}");
         var response = await _httpClient.PostAsync(ApiEndpoint, content);

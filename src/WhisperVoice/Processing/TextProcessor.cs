@@ -7,11 +7,10 @@ using WhisperVoice.Logging;
 namespace WhisperVoice.Processing;
 
 /// <summary>
-/// Processes transcribed text using GPT-4o-mini for AI modes
+/// Processes transcribed text using the configured OpenAI model for AI modes.
 /// </summary>
 public class TextProcessor
 {
-    private const string Model = "gpt-4o-mini";
     private const string Endpoint = "https://api.openai.com/v1/chat/completions";
     private const int TimeoutSeconds = 30;
 
@@ -32,7 +31,13 @@ public class TextProcessor
     /// <param name="mode">AI processing mode</param>
     /// <param name="apiKey">OpenAI API key</param>
     /// <returns>Processed text, or original text if mode doesn't require processing</returns>
-    public async Task<string> ProcessAsync(string text, AIMode mode, string apiKey, DictationContext? context = null)
+    public async Task<string> ProcessAsync(
+        string text,
+        AIMode mode,
+        string apiKey,
+        DictationContext? context = null,
+        string? modelId = null,
+        IReadOnlyList<string>? vocabulary = null)
     {
         // Brut mode - no processing
         if (!mode.RequiresProcessing || string.IsNullOrEmpty(mode.SystemPrompt))
@@ -41,19 +46,22 @@ public class TextProcessor
             return text;
         }
 
-        Logger.Info($"[TextProcessor] Processing with mode: {mode.Name}");
-        var systemPrompt = BuildSystemPrompt(mode, context);
+        var model = ProcessingModelCatalog.Normalize(modelId);
+        Logger.Info($"[TextProcessor] Processing with mode: {mode.Name}, model={model}");
+        var systemPrompt = BuildSystemPrompt(mode, context, vocabulary);
+        var usesCompletionTokens = ProcessingModelCatalog.UsesMaxCompletionTokens(model);
 
         var request = new ChatCompletionRequest
         {
-            Model = Model,
+            Model = model,
             Messages = new[]
             {
                 new ChatMessage { Role = "system", Content = systemPrompt },
                 new ChatMessage { Role = "user", Content = text }
             },
             Temperature = 0.3,
-            MaxTokens = 2048
+            MaxTokens = usesCompletionTokens ? null : 2048,
+            MaxCompletionTokens = usesCompletionTokens ? 2048 : null
         };
 
         var json = JsonSerializer.Serialize(request, JsonOptions);
@@ -98,47 +106,74 @@ public class TextProcessor
         }
     }
 
-    private static string BuildSystemPrompt(AIMode mode, DictationContext? context)
+    private static string BuildSystemPrompt(AIMode mode, DictationContext? context, IReadOnlyList<string>? vocabulary)
     {
+        string systemPrompt;
         if (!mode.IsSuper)
         {
-            return mode.SystemPrompt ?? "";
-        }
-
-        var builder = new StringBuilder();
-
-        if (context?.HasSelectedText == true)
-        {
-            builder.AppendLine("Tu es un assistant intelligent. L'utilisateur a selectionne le texte suivant :");
-            builder.AppendLine("---");
-            builder.AppendLine(context.SelectedText);
-            builder.AppendLine("---");
-            builder.AppendLine("Il te donne une instruction vocale a appliquer sur ce texte.");
+            systemPrompt = mode.SystemPrompt ?? "";
         }
         else
         {
-            builder.AppendLine("Tu es un assistant intelligent. L'utilisateur te donne une instruction vocale.");
+            var builder = new StringBuilder();
+
+            if (context?.HasSelectedText == true)
+            {
+                builder.AppendLine("Tu es un assistant intelligent. L'utilisateur a selectionne le texte suivant :");
+                builder.AppendLine("---");
+                builder.AppendLine(context.SelectedText);
+                builder.AppendLine("---");
+                builder.AppendLine("Il te donne une instruction vocale a appliquer sur ce texte.");
+            }
+            else
+            {
+                builder.AppendLine("Tu es un assistant intelligent. L'utilisateur te donne une instruction vocale.");
+            }
+
+            builder.AppendLine("Reponds UNIQUEMENT avec le resultat demande, rien d'autre.");
+
+            if (context?.HasAmbientContext == true)
+            {
+                builder.AppendLine();
+                builder.AppendLine("Contexte au moment de la dictee, a utiliser seulement si pertinent :");
+
+                if (!string.IsNullOrWhiteSpace(context.ActiveProcessName))
+                {
+                    builder.AppendLine($"- Application active: {context.ActiveProcessName}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(context.ActiveWindowTitle))
+                {
+                    builder.AppendLine($"- Titre de fenetre: {context.ActiveWindowTitle}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(context.BrowserUrl))
+                {
+                    builder.AppendLine($"- URL navigateur: {context.BrowserUrl}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(context.WorkspaceName))
+                {
+                    builder.AppendLine($"- Workspace: {context.WorkspaceName}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(context.ProjectName))
+                {
+                    builder.AppendLine($"- Projet: {context.ProjectName}");
+                }
+            }
+
+            systemPrompt = builder.ToString();
         }
 
-        builder.AppendLine("Reponds UNIQUEMENT avec le resultat demande, rien d'autre.");
-
-        if (context?.HasAmbientContext == true)
+        if (vocabulary?.Count > 0)
         {
-            builder.AppendLine();
-            builder.AppendLine("Contexte au moment de la dictee, a utiliser seulement si pertinent :");
-
-            if (!string.IsNullOrWhiteSpace(context.ActiveProcessName))
-            {
-                builder.AppendLine($"- Application active: {context.ActiveProcessName}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(context.ActiveWindowTitle))
-            {
-                builder.AppendLine($"- Titre de fenetre: {context.ActiveWindowTitle}");
-            }
+            systemPrompt += Environment.NewLine + Environment.NewLine +
+                "Termes a conserver exactement, en restaurant cette orthographe si la transcription les a deformes : " +
+                string.Join(", ", vocabulary) + ".";
         }
 
-        return builder.ToString();
+        return systemPrompt;
     }
 
     private static string ExtractErrorMessage(string responseBody)
@@ -169,7 +204,8 @@ public class TextProcessor
         public string Model { get; set; } = "";
         public ChatMessage[] Messages { get; set; } = Array.Empty<ChatMessage>();
         public double Temperature { get; set; }
-        public int MaxTokens { get; set; }
+        public int? MaxTokens { get; set; }
+        public int? MaxCompletionTokens { get; set; }
     }
 
     private class ChatMessage

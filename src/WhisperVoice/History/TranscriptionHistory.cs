@@ -1,5 +1,6 @@
 using System.Text.Json;
 using WhisperVoice.Logging;
+using WhisperVoice.Processing;
 
 namespace WhisperVoice.History;
 
@@ -61,13 +62,27 @@ public class TranscriptionHistory
 
     public static void AddEntry(string text, string provider, string mode)
     {
+        AddEntry(text, provider, mode, null, null);
+    }
+
+    public static void AddEntry(string text, string provider, string mode, DictationContext? context, string? actionLabel)
+    {
         var entries = LoadHistory();
         entries.Add(new TranscriptionEntry
         {
             Timestamp = DateTime.Now,
             Text = text,
             Provider = provider,
-            Mode = mode
+            Mode = mode,
+            Action = actionLabel ?? "",
+            ProcessName = context?.ActiveProcessName ?? "",
+            ProcessPath = context?.ActiveProcessPath ?? "",
+            WindowTitle = context?.ActiveWindowTitle ?? "",
+            BrowserUrl = context?.BrowserUrl ?? "",
+            BrowserHost = context?.BrowserHost ?? "",
+            WorkspaceName = context?.WorkspaceName ?? "",
+            ProjectId = context?.ProjectId ?? "",
+            ProjectName = context?.ProjectName ?? ""
         });
         SaveHistory(entries);
     }
@@ -94,7 +109,27 @@ public class TranscriptionEntry
     public string Text { get; set; } = "";
     public string Provider { get; set; } = "";
     public string Mode { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public string ProcessPath { get; set; } = "";
+    public string WindowTitle { get; set; } = "";
+    public string BrowserUrl { get; set; } = "";
+    public string BrowserHost { get; set; } = "";
+    public string WorkspaceName { get; set; } = "";
+    public string ProjectId { get; set; } = "";
+    public string ProjectName { get; set; } = "";
 
     public string FormattedTimestamp => Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
     public string Preview => Text.Length > 100 ? Text.Substring(0, 100) + "..." : Text;
+    public string ProjectDisplay => string.IsNullOrWhiteSpace(ProjectName) ? "(untagged)" : ProjectName;
+    public string ContextDisplay
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(WorkspaceName)) return WorkspaceName;
+            if (!string.IsNullOrWhiteSpace(BrowserHost)) return BrowserHost;
+            if (!string.IsNullOrWhiteSpace(ProcessName)) return ProcessName;
+            return "";
+        }
+    }
 }

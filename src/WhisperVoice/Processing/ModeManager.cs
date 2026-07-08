@@ -125,6 +125,76 @@ public class ModeManager
         ModeChanged?.Invoke(CurrentMode);
     }
 
+    public AIMode? ResolveAutoMode(DictationContext context, out AutoModeRuleConfig? matchedRule)
+    {
+        matchedRule = null;
+        var config = _configProvider();
+        if (!config.AutoModeEnabled || config.AutoModeRules.Count == 0)
+        {
+            return null;
+        }
+
+        var candidates = config.AutoModeRules
+            .Select((rule, index) => new { Rule = rule, Index = index })
+            .Where(item => item.Rule.Enabled && item.Rule.IsValid && Matches(item.Rule, context))
+            .OrderByDescending(item => item.Rule.Specificity)
+            .ThenBy(item => item.Index);
+
+        foreach (var candidate in candidates)
+        {
+            var mode = FindMode(candidate.Rule.ModeId);
+            if (mode == null)
+            {
+                Logger.Warn($"[ModeManager] Auto mode rule '{candidate.Rule.Name}' targets missing mode id: {candidate.Rule.ModeId}");
+                continue;
+            }
+
+            if (!IsModeAvailable(mode))
+            {
+                Logger.Warn($"[ModeManager] Auto mode rule '{candidate.Rule.Name}' targets unavailable mode: {mode.Name}");
+                continue;
+            }
+
+            matchedRule = candidate.Rule;
+            return mode;
+        }
+
+        return null;
+    }
+
+    private AIMode? FindMode(string modeId) =>
+        _modes.FirstOrDefault(mode => string.Equals(mode.Id, modeId, StringComparison.OrdinalIgnoreCase));
+
+    private static bool Matches(AutoModeRuleConfig rule, DictationContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.ProcessName) &&
+            !ProcessMatches(context.ActiveProcessName, rule.ProcessName))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rule.WindowTitleContains) &&
+            !TitleMatches(context.ActiveWindowTitle, rule.WindowTitleContains))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ProcessMatches(string? actualProcessName, string expectedProcessName)
+    {
+        if (string.IsNullOrWhiteSpace(actualProcessName)) return false;
+
+        var actual = Path.GetFileNameWithoutExtension(actualProcessName.Trim());
+        var expected = Path.GetFileNameWithoutExtension(expectedProcessName.Trim());
+        return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TitleMatches(string? title, string expectedSubstring) =>
+        !string.IsNullOrWhiteSpace(title) &&
+        title.Contains(expectedSubstring.Trim(), StringComparison.OrdinalIgnoreCase);
+
     public void Reset()
     {
         _currentModeIndex = 0;

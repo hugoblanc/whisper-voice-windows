@@ -1,4 +1,5 @@
 using WhisperVoice.Logging;
+using WhisperVoice.Config;
 
 namespace WhisperVoice.History;
 
@@ -9,9 +10,12 @@ public class HistoryWindow : Form
 {
     private DataGridView _dataGrid = null!;
     private TextBox _searchBox = null!;
+    private ComboBox _projectFilterCombo = null!;
     private Button _copyButton = null!;
     private Button _deleteButton = null!;
+    private Button _tagProjectButton = null!;
     private Button _clearAllButton = null!;
+    private List<ProjectConfig> _projects = new();
     private List<TranscriptionEntry> _allEntries = null!;
     private List<TranscriptionEntry> _filteredEntries = null!;
 
@@ -39,9 +43,24 @@ public class HistoryWindow : Form
         _searchBox = new TextBox
         {
             Location = new Point(70, 12),
-            Size = new Size(300, 25)
+            Size = new Size(260, 25)
         };
-        _searchBox.TextChanged += SearchBox_TextChanged;
+        _searchBox.TextChanged += (_, _) => ApplyFilters();
+
+        var projectLabel = new Label
+        {
+            Text = "Project:",
+            Location = new Point(350, 15),
+            AutoSize = true
+        };
+
+        _projectFilterCombo = new ComboBox
+        {
+            Location = new Point(410, 12),
+            Size = new Size(220, 25),
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+        _projectFilterCombo.SelectedIndexChanged += ProjectFilterCombo_SelectedIndexChanged;
 
         // DataGrid
         _dataGrid = new DataGridView
@@ -80,9 +99,21 @@ public class HistoryWindow : Form
         });
         _dataGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
+            Name = "Project",
+            HeaderText = "Project",
+            FillWeight = 12
+        });
+        _dataGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Context",
+            HeaderText = "Context",
+            FillWeight = 16
+        });
+        _dataGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
             Name = "Text",
             HeaderText = "Transcription",
-            FillWeight = 65
+            FillWeight = 45
         });
 
         _dataGrid.DoubleClick += DataGrid_DoubleClick;
@@ -116,11 +147,20 @@ public class HistoryWindow : Form
         };
         _clearAllButton.Click += ClearAllButton_Click;
 
+        _tagProjectButton = new Button
+        {
+            Text = "Tag Project...",
+            Location = new Point(340, ClientSize.Height - 40),
+            Size = new Size(130, 30),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+        };
+        _tagProjectButton.Click += TagProjectButton_Click;
+
         // Add controls
         Controls.AddRange(new Control[]
         {
-            searchLabel, _searchBox, _dataGrid,
-            _copyButton, _deleteButton, _clearAllButton
+            searchLabel, _searchBox, projectLabel, _projectFilterCombo, _dataGrid,
+            _copyButton, _deleteButton, _clearAllButton, _tagProjectButton
         });
 
         // Keyboard shortcuts
@@ -130,11 +170,16 @@ public class HistoryWindow : Form
 
     private void LoadHistory()
     {
+        var previousProjectFilter = (_projectFilterCombo.SelectedItem as ProjectFilterItem)?.ProjectId;
+        _projects = ProjectStore.LoadProjects()
+            .OrderBy(project => project.Archived)
+            .ThenBy(project => project.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
         _allEntries = TranscriptionHistory.LoadHistory()
             .OrderByDescending(e => e.Timestamp)
             .ToList();
-        _filteredEntries = _allEntries;
-        RefreshGrid();
+        RefreshProjectFilter(previousProjectFilter);
+        ApplyFilters();
     }
 
     private void RefreshGrid()
@@ -147,6 +192,8 @@ public class HistoryWindow : Form
                 entry.FormattedTimestamp,
                 entry.Provider,
                 entry.Mode,
+                entry.ProjectDisplay,
+                entry.ContextDisplay,
                 entry.Preview
             );
         }
@@ -159,28 +206,92 @@ public class HistoryWindow : Form
         var hasSelection = _dataGrid.SelectedRows.Count > 0;
         _copyButton.Enabled = hasSelection;
         _deleteButton.Enabled = hasSelection;
+        _tagProjectButton.Enabled = hasSelection;
         _clearAllButton.Enabled = _allEntries.Count > 0;
     }
 
-    private void SearchBox_TextChanged(object? sender, EventArgs e)
+    private void RefreshProjectFilter(string? selectedProjectId)
     {
-        var searchTerm = _searchBox.Text.ToLower();
+        _projectFilterCombo.SelectedIndexChanged -= ProjectFilterCombo_SelectedIndexChanged;
+        _projectFilterCombo.Items.Clear();
+        _projectFilterCombo.Items.Add(new ProjectFilterItem("", "All projects"));
+        _projectFilterCombo.Items.Add(new ProjectFilterItem(ProjectFilterItem.UntaggedId, "Untagged"));
 
-        if (string.IsNullOrWhiteSpace(searchTerm))
+        foreach (var project in _projects)
         {
-            _filteredEntries = _allEntries;
+            var label = project.Archived ? $"{project.Name} (archived)" : project.Name;
+            _projectFilterCombo.Items.Add(new ProjectFilterItem(project.Id, label));
         }
-        else
+
+        var selectedIndex = 0;
+        if (!string.IsNullOrWhiteSpace(selectedProjectId))
         {
-            _filteredEntries = _allEntries
-                .Where(e => e.Text.ToLower().Contains(searchTerm) ||
-                           e.Provider.ToLower().Contains(searchTerm) ||
-                           e.Mode.ToLower().Contains(searchTerm))
-                .ToList();
+            for (var i = 0; i < _projectFilterCombo.Items.Count; i++)
+            {
+                if (_projectFilterCombo.Items[i] is ProjectFilterItem item &&
+                    string.Equals(item.ProjectId, selectedProjectId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
         }
+
+        _projectFilterCombo.SelectedIndex = selectedIndex;
+        _projectFilterCombo.SelectedIndexChanged += ProjectFilterCombo_SelectedIndexChanged;
+    }
+
+    private void ProjectFilterCombo_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        var searchTerm = _searchBox.Text.Trim().ToLowerInvariant();
+        var projectFilter = (_projectFilterCombo.SelectedItem as ProjectFilterItem)?.ProjectId ?? "";
+
+        _filteredEntries = _allEntries
+            .Where(entry => MatchesProjectFilter(entry, projectFilter))
+            .Where(entry => MatchesSearch(entry, searchTerm))
+            .ToList();
 
         RefreshGrid();
     }
+
+    private static bool MatchesProjectFilter(TranscriptionEntry entry, string projectFilter)
+    {
+        if (string.IsNullOrWhiteSpace(projectFilter))
+        {
+            return true;
+        }
+
+        if (string.Equals(projectFilter, ProjectFilterItem.UntaggedId, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(entry.ProjectId);
+        }
+
+        return string.Equals(entry.ProjectId, projectFilter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesSearch(TranscriptionEntry entry, string searchTerm)
+    {
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            return true;
+        }
+
+        return Contains(entry.Text, searchTerm) ||
+               Contains(entry.Provider, searchTerm) ||
+               Contains(entry.Mode, searchTerm) ||
+               Contains(entry.ProjectDisplay, searchTerm) ||
+               Contains(entry.ContextDisplay, searchTerm) ||
+               Contains(entry.WindowTitle, searchTerm) ||
+               Contains(entry.BrowserUrl, searchTerm);
+    }
+
+    private static bool Contains(string? value, string searchTerm) =>
+        (value ?? "").ToLowerInvariant().Contains(searchTerm);
 
     private void CopyButton_Click(object? sender, EventArgs e)
     {
@@ -235,6 +346,28 @@ public class HistoryWindow : Form
         }
     }
 
+    private void TagProjectButton_Click(object? sender, EventArgs e)
+    {
+        if (_dataGrid.SelectedRows.Count == 0) return;
+
+        var index = _dataGrid.SelectedRows[0].Index;
+        if (index < 0 || index >= _filteredEntries.Count) return;
+
+        var entry = _filteredEntries[index];
+        var currentProject = ProjectStore.GetProject(entry.ProjectId);
+
+        using var dialog = new ProjectPickerDialog(currentProject)
+        {
+            Text = "Tag History Entry"
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        entry.ProjectId = dialog.SelectedProject?.Id ?? "";
+        entry.ProjectName = dialog.SelectedProject?.Name ?? "";
+        TranscriptionHistory.SaveHistory(_allEntries);
+        LoadHistory();
+    }
+
     private void DataGrid_DoubleClick(object? sender, EventArgs e)
     {
         // Double-click copies to clipboard
@@ -264,5 +397,21 @@ public class HistoryWindow : Form
         base.OnShown(e);
         _dataGrid.ClearSelection();
         UpdateButtonStates();
+    }
+
+    private sealed class ProjectFilterItem
+    {
+        public const string UntaggedId = "__untagged";
+
+        public string ProjectId { get; }
+        private readonly string _label;
+
+        public ProjectFilterItem(string projectId, string label)
+        {
+            ProjectId = projectId;
+            _label = label;
+        }
+
+        public override string ToString() => _label;
     }
 }
