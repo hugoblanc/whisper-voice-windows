@@ -1,0 +1,57 @@
+name: Build Windows app
+
+# The maintainer develops on macOS, where this WinForms project cannot be run
+# and only cross-builds with EnableWindowsTargeting. CI on a real Windows
+# runner is the only place the app is actually compiled and shipped from.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create/update the GitHub Release on a tag
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # csproj already pins RuntimeIdentifier=win-x64, SelfContained and
+      # PublishSingleFile, so the output is one standalone WhisperVoice.exe.
+      - name: Publish
+        run: dotnet publish src/WhisperVoice/WhisperVoice.csproj -c Release -o publish
+
+      - name: Check the single-file exe was produced
+        shell: bash
+        run: test -f publish/WhisperVoice.exe
+
+      # Every push to main leaves a downloadable build, so a Mac-only
+      # maintainer can smoke-test without tagging a release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WhisperVoice-exe
+          path: publish/WhisperVoice.exe
+          retention-days: 30
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" publish/WhisperVoice.exe --clobber
+          else
+            gh release create "$TAG" publish/WhisperVoice.exe \
+              --title "Whisper Voice $TAG for Windows" --generate-notes
+          fi
